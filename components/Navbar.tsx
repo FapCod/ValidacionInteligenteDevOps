@@ -27,7 +27,7 @@ export default function Navbar({ userEmail }: NavbarProps) {
         {/* Logo */}
         <Link href="/validar" className="navbar-logo">
           <div className="logo-icon">⚡</div>
-          <span>ValidaConfig</span>
+          <span>ValidaDoc</span>
         </Link>
 
         {/* Navigation Links */}

@@ -1,6 +1,9 @@
 // types/index.ts
 // Tipos compartidos entre frontend y backend
 
+// Re-export del tipo side-by-side desde lib/diff
+export type { SideBySideRow } from "@/lib/diff";
+
 export interface ValidationResult {
   valido: boolean;
   errores: string[];

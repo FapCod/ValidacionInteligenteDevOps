@@ -97,8 +97,9 @@ export async function POST(request: NextRequest) {
     );
   } catch (err) {
     console.error("[/api/validar] Error llamando a Gemini:", err);
+    const mensajeError = err instanceof Error ? err.message : "Error desconocido";
     return NextResponse.json(
-      { error: "Error al conectar con el servicio de IA. Intenta de nuevo." },
+      { error: `Error al conectar con el servicio de IA: ${mensajeError}` },
       { status: 502 }
     );
   }

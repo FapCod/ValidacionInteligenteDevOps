@@ -74,7 +74,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
         {/* Header */}
         <div className="auth-logo">
           <div className="logo-icon">⚡</div>
-          <span style={{ fontWeight: 700, fontSize: "1.1rem" }}>ValidaConfig</span>
+          <span style={{ fontWeight: 700, fontSize: "1.1rem" }}>ValidaDoc</span>
         </div>
         <h1 className="auth-title">
           {isLogin ? "Bienvenido de vuelta" : "Crear cuenta"}

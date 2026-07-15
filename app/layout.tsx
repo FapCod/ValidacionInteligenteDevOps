@@ -3,9 +3,9 @@ import type { Metadata } from "next";
 import "@/app/globals.css";
 
 export const metadata: Metadata = {
-  title: "ValidaConfig — Validación Inteligente de Configuraciones",
+  title: "ValidaDoc — Validador Inteligente de Archivos",
   description:
-    "Compara archivos de configuración y detecta errores con IA antes de hacer un pase a producción.",
+    "Compara y valida archivos de configuración, Stored Procedures SQL, scripts y documentos usando IA antes de hacer un pase a producción.",
 };
 
 export default function RootLayout({

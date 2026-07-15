@@ -448,7 +448,35 @@ a:hover { text-decoration: underline; }
   min-width: 200px;
 }
 
-/* ─── Diff Viewer ─────────────────────────────────────────── */
+/* Badge de tipo de archivo detectado automáticamente */
+.type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid currentColor;
+  opacity: 0.85;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+.detected-type-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  min-height: 22px;
+}
+
+.detected-type-label {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+/* ─── Diff Viewer (Side-by-Side) ─────────────────────────────────────────── */
 .diff-viewer {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -464,6 +492,8 @@ a:hover { text-decoration: underline; }
   padding: 12px 16px;
   background: var(--color-surface-2);
   border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .diff-title {
@@ -476,61 +506,117 @@ a:hover { text-decoration: underline; }
 
 .diff-stats {
   display: flex;
-  gap: 12px;
+  gap: 14px;
   font-size: 0.8rem;
 }
-.diff-stats .added { color: var(--color-success); }
+.diff-stats .added   { color: var(--color-success); }
 .diff-stats .removed { color: var(--color-error); }
 
-.diff-table {
-  width: 100%;
-  border-collapse: collapse;
+/* Cabeceras de columna */
+.diff-col-headers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--color-border);
+}
+.diff-col-header {
+  padding: 7px 12px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.diff-col-header.old {
+  color: #f87171;
+  background: rgba(239,68,68,0.06);
+  border-right: 1px solid var(--color-border);
+}
+.diff-col-header.new {
+  color: #34d399;
+  background: rgba(16,185,129,0.06);
+}
+
+/* Contenedor con scroll */
+.diff-sbs-scroll {
+  max-height: 520px;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+/* Cada fila del diff side-by-side */
+.diff-sbs-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   font-family: var(--font-mono);
   font-size: 0.8rem;
-  overflow-x: auto;
-  display: block;
-  max-height: 500px;
-  overflow-y: auto;
+  line-height: 1.65;
+  min-height: 22px;
 }
+.diff-sbs-row:hover .diff-sbs-cell { filter: brightness(1.12); }
 
-.diff-row { display: flex; }
-.diff-row:hover { filter: brightness(1.15); }
+/* Divisor entre columnas */
+.diff-sbs-row { border-bottom: 1px solid rgba(255,255,255,0.025); }
 
-.diff-row.added   { background: var(--color-diff-added);   border-left: 3px solid var(--color-diff-added-border); }
-.diff-row.removed { background: var(--color-diff-removed); border-left: 3px solid var(--color-diff-removed-border); }
-.diff-row.equal   { border-left: 3px solid transparent; }
+/* Celda individual */
+.diff-sbs-cell {
+  display: flex;
+  align-items: stretch;
+  border-right: 1px solid var(--color-border);
+  min-width: 0;
+}
+.diff-sbs-cell:last-child { border-right: none; }
 
-.diff-line-num {
-  min-width: 40px;
-  padding: 2px 8px;
+/* Gutter de número de línea */
+.sbs-num {
+  min-width: 42px;
+  padding: 2px 6px;
   text-align: right;
   color: var(--color-text-muted);
+  font-size: 0.73rem;
   user-select: none;
   border-right: 1px solid var(--color-border);
-  background: rgba(0,0,0,0.2);
-  font-size: 0.75rem;
-  line-height: 1.6;
+  background: rgba(0,0,0,0.18);
+  flex-shrink: 0;
 }
 
-.diff-sign {
-  min-width: 20px;
-  padding: 2px 4px;
+/* Signo +/- */
+.sbs-sign {
+  min-width: 18px;
+  padding: 2px 2px;
   text-align: center;
-  user-select: none;
   font-weight: 700;
-  line-height: 1.6;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
 }
-.diff-row.added   .diff-sign { color: var(--color-success); }
-.diff-row.removed .diff-sign { color: var(--color-error); }
 
-.diff-content {
+/* Contenido de la línea */
+.sbs-content {
   flex: 1;
-  padding: 2px 12px;
+  padding: 2px 8px;
   white-space: pre;
   overflow: hidden;
-  line-height: 1.6;
   color: var(--color-text);
 }
+
+/* Estados de color por tipo */
+.diff-sbs-cell.removed {
+  background: var(--color-diff-removed);
+  border-left: 3px solid var(--color-diff-removed-border);
+}
+.diff-sbs-cell.removed .sbs-sign { color: var(--color-error); }
+
+.diff-sbs-cell.added {
+  background: var(--color-diff-added);
+  border-left: 3px solid var(--color-diff-added-border);
+}
+.diff-sbs-cell.added .sbs-sign { color: var(--color-success); }
+
+.diff-sbs-cell.equal   { border-left: 3px solid transparent; }
+.diff-sbs-cell.empty   {
+  background: rgba(0,0,0,0.12);
+  border-left: 3px solid transparent;
+}
+.diff-sbs-cell.empty .sbs-content { opacity: 0.2; }
+
 
 /* ─── Validation Result ───────────────────────────────────── */
 .result-card {
