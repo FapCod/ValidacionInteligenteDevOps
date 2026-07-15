@@ -16,6 +16,15 @@ Tu tarea es comparar la versión "antigua" (en producción) de un archivo con la
 4. Problemas en consultas SQL embebidas o Stored Procedures (validar sintaxis SQL básica, que las tablas/campos referenciados tengan coherencia lógica, cadenas de conexión mal formadas o parámetros de configuración faltantes)
 5. Valores críticos sospechosos (parámetros vacíos, nulos o apuntando a entornos locales/desarrollo erróneos en el archivo de producción)
 
+REGLA CRÍTICA DE VALIDACIÓN (DELTA):
+- Concéntrate EXCLUSIVAMENTE en los cambios nuevos introducidos en el archivo nuevo (la diferencia/delta).
+- Si una advertencia de seguridad, variable vacía (ej: llaves AWS vacías), configuración insegura o hostname ya existía de forma idéntica en el ARCHIVO ANTIGUO, NO lo reportes como advertencia ni error. El objetivo es validar la seguridad e integridad del pase actual, no auditar configuraciones legadas que ya están corriendo y aprobadas en producción.
+
+Si el archivo es un script SQL o un Stored Procedure (SP):
+- Debes realizar una validación de consistencia de variables y tablas temporales.
+- Si en el código modificado/agregado se hace referencia a una variable (ej: @miVariable) o a una columna de una tabla temporal (ej: #MiTabla.NombreColumna o INSERT INTO #MiTabla (Columna)), debes verificar que dicha variable o columna realmente estén declaradas en las "Declaraciones Globales de Contexto" proporcionadas.
+- Si una variable o columna es utilizada pero no aparece declarada en las definiciones del archivo, considéralo un error crítico ("valido": false) especificando qué variable o columna de tabla temporal no ha sido declarada.
+
 Responde ÚNICAMENTE en formato JSON plano con la siguiente estructura exacta. No agregues explicaciones adicionales fuera del JSON, no uses bloques de código con markdown ni backticks:
 {
   "valido": true,
@@ -26,6 +35,57 @@ Responde ÚNICAMENTE en formato JSON plano con la siguiente estructura exacta. N
 
 Si encuentras algún error de sintaxis o inconsistencia crítica que pueda romper el despliegue o la base de datos, el campo "valido" debe ser obligatoriamente false. Si solo hay cambios normales y observaciones menores, "valido" puede ser true.`;
 
+// ─── Extractor de Contexto Declarativo de SQL ─────────────────────────────────
+/**
+ * Escanea el código SQL en busca de declaraciones de variables y de tablas temporales.
+ * Esto se envía como contexto estático a la IA para evitar que declare variables
+ * o columnas inexistentes al analizar diffs fragmentados en archivos grandes.
+ */
+function extraerContextoDeclaracionesSql(sqlText: string): string {
+  const lines = sqlText.split("\n");
+  const declarations: string[] = [];
+  let inCreateTableBlock = false;
+  let currentTableBlock = "";
+
+  for (let line of lines) {
+    const trimmed = line.trim();
+    const upper = trimmed.toUpperCase();
+
+    // 1. Capturar declaraciones simples: DECLARE @Variable TipoData
+    if (upper.startsWith("DECLARE @") && !upper.includes(" TABLE")) {
+      declarations.push(trimmed);
+      continue;
+    }
+
+    // 2. Capturar inicio de tabla temporal o variable tipo TABLE
+    const isStartTable = upper.startsWith("CREATE TABLE #") || (upper.startsWith("DECLARE @") && upper.includes(" TABLE"));
+    if (isStartTable) {
+      inCreateTableBlock = true;
+      currentTableBlock = trimmed;
+      // Si la declaración de tabla se cierra en la misma línea
+      if (trimmed.endsWith(")") || trimmed.endsWith(");")) {
+        declarations.push(currentTableBlock);
+        inCreateTableBlock = false;
+        currentTableBlock = "";
+      }
+      continue;
+    }
+
+    // 3. Acumular líneas del bloque de definición de tabla hasta su cierre
+    if (inCreateTableBlock) {
+      currentTableBlock += "\n  " + trimmed;
+      if (trimmed.startsWith(")") || trimmed.endsWith(")") || trimmed.endsWith(");")) {
+        declarations.push(currentTableBlock);
+        inCreateTableBlock = false;
+        currentTableBlock = "";
+      }
+    }
+  }
+
+  if (declarations.length === 0) return "";
+  return declarations.join("\n\n");
+}
+
 // ─── Optimizador de Tokens (Reducción inteligente de tamaño) ──────────────────
 function construirUserPrompt(
   contenidoAntiguo: string,
@@ -33,24 +93,18 @@ function construirUserPrompt(
   nombreArchivo: string
 ): string {
   const combinadaLen = contenidoAntiguo.length + contenidoNuevo.length;
-  const LIMIT_CHARS = 10000; // ~2,500 tokens máximo para evitar cuotas TPM bajas en Free Tiers
+  const LIMIT_CHARS = 10000; // ~2,500 tokens máximo
+  const extension = nombreArchivo.split(".").pop()?.toLowerCase();
+  const esSql = extension === "sql" || extension === "sp" || extension === "proc";
 
-  if (combinadaLen < LIMIT_CHARS) {
-    // Si el archivo es pequeño, enviarlo completo para un contexto del 100%
-    return `Archivo: ${nombreArchivo}
-
-=== ARCHIVO ANTIGUO (producción actual) ===
-${contenidoAntiguo}
-
-=== ARCHIVO NUEVO (a desplegar) ===
-${contenidoNuevo}
-
-Analiza los archivos completos y responde en JSON.`;
+  // Extraer declaraciones de SQL en caso de que sea un script SQL
+  let sqlContext = "";
+  if (esSql) {
+    sqlContext = extraerContextoDeclaracionesSql(contenidoNuevo);
   }
 
-  // Si el archivo es muy grande, extraer solo las diferencias y su contexto.
-  // Esto reduce el consumo de tokens en un ~90% de forma instantánea.
-  console.log(`[IA] Archivo grande (${(combinadaLen / 1024).toFixed(1)} KB). Extrayendo diff con contexto para optimizar tokens...`);
+  // Siempre extraemos únicamente las diferencias y su contexto.
+  // Esto previene que la IA analice u observe código preexistente/heredado que no ha cambiado.
   const diffLines = computeDiffWithContext(contenidoAntiguo, contenidoNuevo, 4);
 
   const diffText = diffLines
@@ -64,14 +118,24 @@ Analiza los archivos completos y responde en JSON.`;
     })
     .join("\n");
 
-  return `Archivo: ${nombreArchivo}
+  let prompt = `Archivo: ${nombreArchivo}
 
-El archivo es demasiado grande para procesarlo completo en el plan gratuito. A continuación se presentan únicamente las diferencias y los cambios detectados junto con algunas líneas de contexto alrededor de los mismos.
+A continuación se presentan únicamente las diferencias y los cambios detectados junto con algunas líneas de contexto alrededor de los mismos.`;
 
-=== DIFERENCIAS DETECTADAS ===
+  // Si es SQL, inyectar el contexto estático de declaraciones que extrajimos de todo el archivo
+  if (esSql && sqlContext) {
+    prompt += `\n\n=== DECLARACIONES GLOBALES DE CONTEXTO (Tablas temporales y variables declaradas en el archivo) ===
+${sqlContext}
+
+(Utiliza estas definiciones para validar que cualquier variable o columna temporal utilizada en el diff realmente exista y esté declarada en el archivo. Si en el diff se inserta en una tabla temporal, valida que coincida con las columnas definidas arriba).`;
+  }
+
+  prompt += `\n\n=== DIFERENCIAS DETECTADAS ===
 ${diffText}
 
-Analiza estas diferencias y su contexto para identificar errores y responde en JSON.`;
+Analiza las diferencias apoyándote en el contexto para identificar errores y responde en JSON.`;
+
+  return prompt;
 }
 
 // ─── Cliente OpenRouter ──────────────────────────────────────────────────────
@@ -230,16 +294,23 @@ export async function validarConIA(
   let responseText = "";
   const openrouterApiKey = process.env.OPENROUTER_API_KEY;
   const groqApiKey = process.env.GROQ_API_KEY;
+  let proveedor = "Google Gemini";
 
   try {
     if (openrouterApiKey) {
-      console.log("[IA] Utilizando OpenRouter API");
+      const model = process.env.OPENROUTER_MODEL || "openrouter/free";
+      proveedor = `OpenRouter (${model})`;
+      console.log(`[IA] Utilizando OpenRouter API: ${model}`);
       responseText = await llamarAOpenRouter(openrouterApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo);
     } else if (groqApiKey) {
-      console.log("[IA] Utilizando Groq API");
+      const model = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
+      proveedor = `Groq (${model})`;
+      console.log(`[IA] Utilizando Groq API: ${model}`);
       responseText = await llamarAGroq(groqApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo);
     } else {
-      console.log("[IA] Utilizando Google Gemini API");
+      const model = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+      proveedor = `Google Gemini (${model})`;
+      console.log(`[IA] Utilizando Google Gemini API: ${model}`);
       responseText = await llamarAGemini(contenidoAntiguo, contenidoNuevo, nombreArchivo);
     }
 
@@ -260,6 +331,7 @@ export async function validarConIA(
       errores: Array.isArray(parsed.errores) ? parsed.errores : [],
       advertencias: Array.isArray(parsed.advertencias) ? parsed.advertencias : [],
       resumen: parsed.resumen || "Sin resumen disponible",
+      proveedor,
     };
   } catch (err: any) {
     console.error("[IA Error]", err);
@@ -270,6 +342,7 @@ export async function validarConIA(
       ],
       advertencias: [],
       resumen: "No se pudo completar la validación automática.",
+      proveedor,
     };
   }
 }

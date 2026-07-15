@@ -102,6 +102,7 @@ export async function POST(request: NextRequest) {
         errores: [`Error de sintaxis JSON crítico: ${errorMsg}`],
         advertencias: [],
         resumen: "El archivo nuevo no es un JSON válido.",
+        proveedor: "Analizador Local",
       });
     }
   }
@@ -115,11 +116,34 @@ export async function POST(request: NextRequest) {
   if (esXml) {
     const xmlCheck = validarXml(contenido_nuevo);
     if (!xmlCheck.valido) {
+      let reporteError = "";
+
+      if (xmlCheck.tipo === "sin_cerrar" && xmlCheck.tagMalo) {
+        // Sugerir la corrección agregando ' />' al final
+        const tagSugerido = xmlCheck.tagMalo.endsWith("/") 
+          ? xmlCheck.tagMalo 
+          : `${xmlCheck.tagMalo} />`;
+
+        reporteError = `### 🔴 Error Crítico de Sintaxis (Bloquea el Despliegue)
+**Problema:** Falta el cierre de etiqueta \`/>\` o \`>\` en la línea ${xmlCheck.linea} para la etiqueta \`${xmlCheck.tagMalo}\`.
+**Impacto:** IIS no podrá parsear el archivo de configuración. La aplicación se caerá inmediatamente al desplegarse con un error \`HTTP Error 500.19 - Internal Server Error\`.
+**Solución:** Corrige el cierre de la etiqueta en la línea ${xmlCheck.linea} para que quede bien construida:
+\`\`\`xml
+${tagSugerido}
+\`\`\``;
+      } else {
+        reporteError = `### 🔴 Error Crítico de Sintaxis (Bloquea el Despliegue)
+**Detalle:** ${xmlCheck.error || "XML mal formado"}
+**Impacto:** Fallo inmediato en la inicialización de IIS o el servidor web.
+**Solución:** Verifica que todas las etiquetas XML estén balanceadas y bien cerradas en tu archivo nuevo.`;
+      }
+
       return NextResponse.json({
         valido: false,
-        errores: [`Error de sintaxis XML crítico: ${xmlCheck.error}`],
+        errores: [reporteError],
         advertencias: [],
-        resumen: "El archivo nuevo no es un documento XML bien formado.",
+        resumen: "El archivo nuevo tiene un error de sintaxis XML crítico y no se puede desplegar.",
+        proveedor: "Analizador Local",
       });
     }
   }

@@ -8,12 +8,35 @@ interface Props {
 }
 
 export default function ValidationResultPanel({ result }: Props) {
-  const { valido, errores, advertencias, resumen } = result;
+  const { valido, errores, advertencias, resumen, proveedor } = result;
 
   return (
-    <div className={`result-card ${valido ? "valid" : "invalid"}`}>
+    <div className={`result-card ${valido ? "valid" : "invalid"}`} style={{ position: "relative" }}>
+      {/* Badge de Proveedor */}
+      {proveedor && (
+        <span 
+          style={{
+            position: "absolute",
+            top: "14px",
+            right: "16px",
+            fontSize: "0.72rem",
+            background: "rgba(255, 255, 255, 0.05)",
+            border: "1px solid rgba(255, 255, 255, 0.1)",
+            padding: "3px 10px",
+            borderRadius: "12px",
+            color: "var(--color-text-subtle)",
+            fontWeight: 600,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "5px"
+          }}
+        >
+          🤖 Motor: {proveedor}
+        </span>
+      )}
+
       {/* Header */}
-      <div className="result-header">
+      <div className="result-header" style={{ paddingRight: proveedor ? "160px" : "16px" }}>
         <div className="result-icon">{valido ? "✅" : "❌"}</div>
         <div>
           <div className="result-title">
@@ -23,7 +46,7 @@ export default function ValidationResultPanel({ result }: Props) {
           </div>
           <div className="result-subtitle">
             {valido
-              ? "La IA no detectó problemas críticos en el archivo nuevo"
+              ? "El motor de análisis no detectó problemas críticos"
               : `Se detectaron ${errores.length} error${errores.length !== 1 ? "es" : ""} crítico${errores.length !== 1 ? "s" : ""}`}
           </div>
         </div>

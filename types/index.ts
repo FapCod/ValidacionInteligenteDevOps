@@ -9,6 +9,7 @@ export interface ValidationResult {
   errores: string[];
   advertencias: string[];
   resumen: string;
+  proveedor?: string; // IA o motor que procesó la validación
 }
 
 export interface Validacion {

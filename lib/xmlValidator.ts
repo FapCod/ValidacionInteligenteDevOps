@@ -5,11 +5,15 @@
 export interface XmlValidationResult {
   valido: boolean;
   error?: string;
+  linea?: number;
+  tipo?: "sin_cerrar" | "cruzado" | "invalido" | "abierto_final";
+  tagMalo?: string;
+  nombreTag?: string;
 }
 
 /**
  * Valida si un texto es un documento XML bien formado.
- * Retorna true o el error de sintaxis detallado con número de línea.
+ * Retorna true o el error de sintaxis enriquecido para generar reportes estructurados.
  */
 export function validarXml(xmlText: string): XmlValidationResult {
   let pos = 0;
@@ -26,6 +30,8 @@ export function validarXml(xmlText: string): XmlValidationResult {
       const lineNum = xmlText.substring(0, nextOpen).split("\n").length;
       return {
         valido: false,
+        tipo: "abierto_final",
+        linea: lineNum,
         error: `Error en línea ${lineNum}: Etiqueta XML abierta sin cerrar al final del archivo.`,
       };
     }
@@ -35,12 +41,16 @@ export function validarXml(xmlText: string): XmlValidationResult {
 
     // Ignorar comentarios XML <!-- ... -->
     if (tagContent.startsWith("!--")) {
-      // Si el comentario no termina correctamente antes del cierre de este tag, buscar su verdadero final
       if (!tagContent.endsWith("--")) {
         const commentClose = xmlText.indexOf("-->", nextOpen);
         if (commentClose === -1) {
           const lineNum = xmlText.substring(0, nextOpen).split("\n").length;
-          return { valido: false, error: `Error en línea ${lineNum}: Comentario XML sin cerrar.` };
+          return {
+            valido: false,
+            tipo: "abierto_final",
+            linea: lineNum,
+            error: `Error en línea ${lineNum}: Comentario XML sin cerrar.`,
+          };
         }
         pos = commentClose + 3;
       }
@@ -60,9 +70,12 @@ export function validarXml(xmlText: string): XmlValidationResult {
         const lineNum = xmlText.substring(0, nextOpen).split("\n").length;
         return {
           valido: false,
+          tipo: "cruzado",
+          linea: lineNum,
+          nombreTag: tagName,
           error: lastOpen
-            ? `Error en línea ${lineNum}: Se esperaba cerrar la etiqueta </${lastOpen}> pero se encontró </${tagName}>.`
-            : `Error en línea ${lineNum}: Se encontró una etiqueta de cierre </${tagName}> sin una etiqueta de apertura correspondiente.`,
+            ? `Se esperaba cerrar la etiqueta </${lastOpen}> pero se encontró </${tagName}>.`
+            : `Se encontró una etiqueta de cierre </${tagName}> sin una etiqueta de apertura correspondiente.`,
         };
       }
       continue;
@@ -77,9 +90,17 @@ export function validarXml(xmlText: string): XmlValidationResult {
     // nunca se cerró con ">" y el parser saltó directamente al inicio de la siguiente.
     if (tagContent.includes("<")) {
       const lineNum = xmlText.substring(0, nextOpen).split("\n").length;
+      
+      // Extraemos la línea física que causó el error para aislar el tag roto
+      const lines = xmlText.substring(0, nextOpen).split("\n");
+      const badLineContent = lines[lines.length - 1] || "";
+      
       return {
         valido: false,
-        error: `Error de sintaxis en línea ${lineNum}: Etiqueta mal formada o etiqueta sin cerrar con '/>' o '>'.`,
+        tipo: "sin_cerrar",
+        linea: lineNum,
+        tagMalo: badLineContent.trim(),
+        error: `Etiqueta mal formada o etiqueta sin cerrar con '/>' o '>'.`,
       };
     }
 
@@ -93,7 +114,9 @@ export function validarXml(xmlText: string): XmlValidationResult {
       const lineNum = xmlText.substring(0, nextOpen).split("\n").length;
       return {
         valido: false,
-        error: `Error en línea ${lineNum}: Nombre de etiqueta XML inválido o mal formado.`,
+        tipo: "invalido",
+        linea: lineNum,
+        error: `Nombre de etiqueta XML inválido o mal formado.`,
       };
     }
 
@@ -103,7 +126,9 @@ export function validarXml(xmlText: string): XmlValidationResult {
   if (stack.length > 0) {
     return {
       valido: false,
-      error: `Error de estructura: La etiqueta <${stack[stack.length - 1]}> quedó abierta y no se cerró al final del documento.`,
+      tipo: "abierto_final",
+      nombreTag: stack[stack.length - 1],
+      error: `La etiqueta <${stack[stack.length - 1]}> quedó abierta y no se cerró al final del documento.`,
     };
   }
 
