@@ -4,7 +4,8 @@
 // Si no, recurre a Groq o Google Gemini respectivamente.
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import type { ValidationResult } from "@/types";
+import { computeDiffWithContext } from "./diff";
+import type { DiffLine, ValidationResult } from "@/types";
 
 const SYSTEM_PROMPT = `Eres un experto de nivel senior en revisión de código, archivos de configuración (XML, JSON, .env, .config, web.config, appsettings.json), Stored Procedures y scripts SQL.
 
@@ -25,17 +26,18 @@ Responde ÚNICAMENTE en formato JSON plano con la siguiente estructura exacta. N
 
 Si encuentras algún error de sintaxis o inconsistencia crítica que pueda romper el despliegue o la base de datos, el campo "valido" debe ser obligatoriamente false. Si solo hay cambios normales y observaciones menores, "valido" puede ser true.`;
 
-// ─── Cliente OpenRouter (Ideal para cuentas gratuitas sin límites agresivos) ──
-async function llamarAOpenRouter(
-  apiKey: string,
+// ─── Optimizador de Tokens (Reducción inteligente de tamaño) ──────────────────
+function construirUserPrompt(
   contenidoAntiguo: string,
   contenidoNuevo: string,
   nombreArchivo: string
-): Promise<string> {
-  const modelName = process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash:free";
+): string {
+  const combinadaLen = contenidoAntiguo.length + contenidoNuevo.length;
+  const LIMIT_CHARS = 10000; // ~2,500 tokens máximo para evitar cuotas TPM bajas en Free Tiers
 
-  const requestCompletion = async (selectedModel: string) => {
-    const userPrompt = `Archivo: ${nombreArchivo}
+  if (combinadaLen < LIMIT_CHARS) {
+    // Si el archivo es pequeño, enviarlo completo para un contexto del 100%
+    return `Archivo: ${nombreArchivo}
 
 === ARCHIVO ANTIGUO (producción actual) ===
 ${contenidoAntiguo}
@@ -43,8 +45,46 @@ ${contenidoAntiguo}
 === ARCHIVO NUEVO (a desplegar) ===
 ${contenidoNuevo}
 
-Analiza las diferencias y responde en JSON.`;
+Analiza los archivos completos y responde en JSON.`;
+  }
 
+  // Si el archivo es muy grande, extraer solo las diferencias y su contexto.
+  // Esto reduce el consumo de tokens en un ~90% de forma instantánea.
+  console.log(`[IA] Archivo grande (${(combinadaLen / 1024).toFixed(1)} KB). Extrayendo diff con contexto para optimizar tokens...`);
+  const diffLines = computeDiffWithContext(contenidoAntiguo, contenidoNuevo, 4);
+
+  const diffText = diffLines
+    .map((line: DiffLine) => {
+      const sign = line.type === "added" ? "[AGREGADO]" : line.type === "removed" ? "[ELIMINADO]" : "[CONTEXTO]";
+      const oldLineNum = line.lineOld ? `Antiguo L${line.lineOld}` : "";
+      const newLineNum = line.lineNew ? `Nuevo L${line.lineNew}` : "";
+      const lineNumStr = [oldLineNum, newLineNum].filter(Boolean).join(" -> ");
+      
+      return `${sign} (${lineNumStr}): ${line.content}`;
+    })
+    .join("\n");
+
+  return `Archivo: ${nombreArchivo}
+
+El archivo es demasiado grande para procesarlo completo en el plan gratuito. A continuación se presentan únicamente las diferencias y los cambios detectados junto con algunas líneas de contexto alrededor de los mismos.
+
+=== DIFERENCIAS DETECTADAS ===
+${diffText}
+
+Analiza estas diferencias y su contexto para identificar errores y responde en JSON.`;
+}
+
+// ─── Cliente OpenRouter ──────────────────────────────────────────────────────
+async function llamarAOpenRouter(
+  apiKey: string,
+  contenidoAntiguo: string,
+  contenidoNuevo: string,
+  nombreArchivo: string
+): Promise<string> {
+  const modelName = process.env.OPENROUTER_MODEL || "openrouter/free";
+  const userPrompt = construirUserPrompt(contenidoAntiguo, contenidoNuevo, nombreArchivo);
+
+  const requestCompletion = async (selectedModel: string) => {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -60,13 +100,11 @@ Analiza las diferencias y responde en JSON.`;
           { role: "user", content: userPrompt },
         ],
         temperature: 0.1,
-        response_format: { type: "json_object" },
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      // Retornar objeto de error estructurado
       return JSON.stringify({ error: true, status: response.status, message: errorText });
     }
 
@@ -76,16 +114,14 @@ Analiza las diferencias y responde en JSON.`;
 
   let result = await requestCompletion(modelName);
   
-  // Si da error 404 (modelo descontinuado/no encontrado) y no estábamos usando el de fallback
-  if (result.startsWith('{"error":true') && modelName !== "google/gemini-2.5-flash:free") {
+  if (result.startsWith('{"error":true') && modelName !== "openrouter/free") {
     const errorObj = JSON.parse(result);
     if (errorObj.status === 404) {
-      console.warn(`[OpenRouter] Modelo ${modelName} no encontrado (404). Reintentando con fallback google/gemini-2.5-flash:free...`);
-      result = await requestCompletion("google/gemini-2.5-flash:free");
+      console.warn(`[OpenRouter] Modelo ${modelName} no encontrado (404). Reintentando con fallback openrouter/free...`);
+      result = await requestCompletion("openrouter/free");
     }
   }
 
-  // Si a pesar del fallback sigue habiendo error, lanzar la excepción
   if (result.startsWith('{"error":true')) {
     const errorObj = JSON.parse(result);
     throw new Error(`Error de OpenRouter API (${errorObj.status}): ${errorObj.message}`);
@@ -94,7 +130,7 @@ Analiza las diferencias y responde en JSON.`;
   return result;
 }
 
-// ─── Cliente Groq (Llama) ───────────────────────────────────────────────────
+// ─── Cliente Groq ────────────────────────────────────────────────────────────
 async function llamarAGroq(
   apiKey: string,
   contenidoAntiguo: string,
@@ -102,15 +138,7 @@ async function llamarAGroq(
   nombreArchivo: string
 ): Promise<string> {
   const modelName = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
-  const userPrompt = `Archivo: ${nombreArchivo}
-
-=== ARCHIVO ANTIGUO (producción actual) ===
-${contenidoAntiguo}
-
-=== ARCHIVO NUEVO (a desplegar) ===
-${contenidoNuevo}
-
-Analiza las diferencias y responde en JSON.`;
+  const userPrompt = construirUserPrompt(contenidoAntiguo, contenidoNuevo, nombreArchivo);
 
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
@@ -156,6 +184,7 @@ async function llamarAGemini(
 ): Promise<string> {
   const genAI = getGeminiClient();
   const modelName = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+  const userPrompt = construirUserPrompt(contenidoAntiguo, contenidoNuevo, nombreArchivo);
 
   const runGeneration = async (selectedModel: string) => {
     const apiVersion = selectedModel.includes("2.0") ? "v1beta" : "v1";
@@ -166,16 +195,6 @@ async function llamarAGemini(
       },
       { apiVersion }
     );
-
-    const userPrompt = `Archivo: ${nombreArchivo}
-
-=== ARCHIVO ANTIGUO (producción actual) ===
-${contenidoAntiguo}
-
-=== ARCHIVO NUEVO (a desplegar) ===
-${contenidoNuevo}
-
-Analiza las diferencias y responde en JSON.`;
 
     const result = await model.generateContent([
       { text: SYSTEM_PROMPT },

@@ -16,6 +16,7 @@ import { requireAuth, AuthError } from "@/lib/auth";
 import { validarConIA } from "@/lib/gemini";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { createSupabaseServerClient } from "@/lib/supabase";
+import { validarXml } from "@/lib/xmlValidator";
 import type { ValidarRequestBody } from "@/types";
 
 const MAX_FILE_SIZE_BYTES = 200 * 1024; // 200KB por archivo
@@ -87,7 +88,43 @@ export async function POST(request: NextRequest) {
     .replace(/[^a-zA-Z0-9.\-_\s]/g, "")
     .slice(0, 255);
 
-  // 6. Llamar a Gemini (server → Gemini, el browser no participa)
+  const extension = nombreSanitizado.split(".").pop()?.toLowerCase();
+
+  // ─── Validación Sintáctica Local Determinista (JSON y XML) ───────────────
+  // Si el archivo está físicamente roto a nivel de estructura, no es necesario llamar a la IA.
+  if (extension === "json" || contenido_nuevo.trim().startsWith("{") || contenido_nuevo.trim().startsWith("[")) {
+    try {
+      JSON.parse(contenido_nuevo);
+    } catch (jsonErr: any) {
+      const errorMsg = jsonErr?.message || "JSON mal formado.";
+      return NextResponse.json({
+        valido: false,
+        errores: [`Error de sintaxis JSON crítico: ${errorMsg}`],
+        advertencias: [],
+        resumen: "El archivo nuevo no es un JSON válido.",
+      });
+    }
+  }
+
+  const esXml = extension === "xml" || 
+                extension === "config" || 
+                extension === "web.config" || 
+                contenido_nuevo.trim().startsWith("<?xml") || 
+                contenido_nuevo.trim().startsWith("<configuration");
+
+  if (esXml) {
+    const xmlCheck = validarXml(contenido_nuevo);
+    if (!xmlCheck.valido) {
+      return NextResponse.json({
+        valido: false,
+        errores: [`Error de sintaxis XML crítico: ${xmlCheck.error}`],
+        advertencias: [],
+        resumen: "El archivo nuevo no es un documento XML bien formado.",
+      });
+    }
+  }
+
+  // 6. Llamar a la IA (server → IA, el browser no participa)
   let resultadoIA;
   try {
     resultadoIA = await validarConIA(

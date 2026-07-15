@@ -102,3 +102,33 @@ export function computeSideBySideDiff(
 
   return rows;
 }
+
+/**
+ * Devuelve solo las líneas que cambiaron + N líneas de contexto alrededor.
+ * Útil para archivos grandes donde enviar todo el archivo a la IA sería excesivo.
+ */
+export function computeDiffWithContext(
+  oldText: string,
+  newText: string,
+  contextLines = 3
+): DiffLine[] {
+  const all = computeDiff(oldText, newText);
+  const changedIndices = new Set<number>();
+
+  all.forEach((line, i) => {
+    if (line.type !== "equal") {
+      for (
+        let j = Math.max(0, i - contextLines);
+        j <= Math.min(all.length - 1, i + contextLines);
+        j++
+      ) {
+        changedIndices.add(j);
+      }
+    }
+  });
+
+  if (changedIndices.size === 0) return all; // Sin cambios
+
+  return all.filter((_, i) => changedIndices.has(i));
+}
+
