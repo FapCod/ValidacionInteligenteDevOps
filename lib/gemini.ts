@@ -259,11 +259,13 @@ async function llamarAGemini(
   nombreArchivo: string
 ): Promise<string> {
   const genAI = getGeminiClient();
-  const modelName = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+  // Preferir gemini-2.5-flash como modelo base moderno
+  const modelName = process.env.GEMINI_MODEL || "gemini-2.5-flash";
   const userPrompt = construirUserPrompt(contenidoAntiguo, contenidoNuevo, nombreArchivo);
 
   const runGeneration = async (selectedModel: string) => {
-    const apiVersion = selectedModel.includes("2.0") ? "v1beta" : "v1";
+    // Las claves de API modernas de Google AI Studio (que inician con 'AQ.') requieren v1beta para rutear correctamente.
+    const apiVersion = "v1beta";
     const model = genAI.getGenerativeModel(
       {
         model: selectedModel,
@@ -283,15 +285,46 @@ async function llamarAGemini(
   try {
     return await runGeneration(modelName);
   } catch (err: any) {
+    const errStr = String(err?.message || err || "");
     const isQuotaOrNotFoundError =
-      err?.message?.includes("429") ||
-      err?.message?.includes("quota") ||
-      err?.message?.includes("404") ||
-      err?.message?.includes("not found");
+      errStr.includes("429") ||
+      errStr.includes("quota") ||
+      errStr.includes("404") ||
+      errStr.includes("not found");
 
-    if (isQuotaOrNotFoundError && modelName !== "gemini-1.5-flash") {
-      console.warn(`[Gemini] Error con el modelo ${modelName}. Reintentando con gemini-1.5-flash...`);
-      return await runGeneration("gemini-1.5-flash");
+    if (isQuotaOrNotFoundError) {
+      console.warn(`[Gemini Diagnosis] Falló el modelo ${modelName}. Motivo: ${errStr}. Consultando modelos autorizados para la clave API...`);
+      try {
+        const apiKey = process.env.GEMINI_API_KEY || "";
+        const diagResponse = await fetch(`https://generativelanguage.googleapis.com/v1/models?key=${apiKey}`);
+        if (diagResponse.ok) {
+          const diagData = await diagResponse.json();
+          const listaModelos = diagData.models ? diagData.models.map((m: any) => m.name) : [];
+          console.warn("[Gemini Diagnosis] Modelos disponibles para esta clave:", listaModelos);
+          
+          // Buscar cualquier versión de flash o pro autorizada en orden de preferencia
+          const familiasPreferencia = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-3.5-flash", "gemini-2.5-pro", "gemini-1.5-flash"];
+          let modeloAlternativo = "";
+          
+          for (const familia of familiasPreferencia) {
+            const encontrado = listaModelos.find((m: string) => m.includes(familia));
+            if (encontrado) {
+              modeloAlternativo = encontrado.replace("models/", "");
+              break;
+            }
+          }
+
+          if (modeloAlternativo && modeloAlternativo !== modelName) {
+            console.warn(`[Gemini Diagnosis] Reintentando dinámicamente con modelo listado y autorizado: ${modeloAlternativo}`);
+            return await runGeneration(modeloAlternativo);
+          }
+        } else {
+          const errText = await diagResponse.text();
+          console.error(`[Gemini Diagnosis] Error al consultar modelos: ${diagResponse.status} - ${errText}`);
+        }
+      } catch (diagErr) {
+        console.error("[Gemini Diagnosis] Error en el flujo de diagnóstico:", diagErr);
+      }
     }
     throw err;
   }

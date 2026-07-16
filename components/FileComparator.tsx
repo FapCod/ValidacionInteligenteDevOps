@@ -87,6 +87,51 @@ function TypeBadge({ detected }: { detected: DetectedType | null }) {
   );
 }
 
+// ─── Editor de Código con Números de Línea Sincronizados ─────────────────────
+interface CodeEditorWithLinesProps {
+  value: string;
+  onChange: (val: string) => void;
+  placeholder: string;
+  variant: "old" | "new";
+}
+
+function CodeEditorWithLines({ value, onChange, placeholder, variant }: CodeEditorWithLinesProps) {
+  const gutterRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleTextareaScroll = () => {
+    if (textareaRef.current && gutterRef.current) {
+      gutterRef.current.scrollTop = textareaRef.current.scrollTop;
+    }
+  };
+
+  // Generamos los números de línea correspondientes
+  const lineCount = value.split("\n").length;
+  const lines = Array.from({ length: Math.max(lineCount, 1) }, (_, i) => i + 1);
+
+  return (
+    <div className="code-editor-container">
+      <div ref={gutterRef} className="code-editor-gutter" aria-hidden="true">
+        {lines.map((num) => (
+          <div key={num} className="gutter-line-num">
+            {num}
+          </div>
+        ))}
+      </div>
+      <textarea
+        ref={textareaRef}
+        className="code-editor-textarea"
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onScroll={handleTextareaScroll}
+        spellCheck={false}
+        id={`textarea-${variant}`}
+      />
+    </div>
+  );
+}
+
 // ─── Panel de archivo (izquierdo o derecho) ───────────────────────────────────
 interface FilePanelProps {
   label: string;
@@ -174,17 +219,15 @@ function FilePanel({ label, variant, value, onChange, onFileLoad }: FilePanelPro
           </div>
         ) : null}
 
-        <textarea
-          className="file-textarea"
+        <CodeEditorWithLines
+          value={value}
+          onChange={onChange}
           placeholder={
             variant === "old"
               ? "Pega aquí el contenido del archivo en producción..."
               : "Pega aquí el contenido del archivo a desplegar..."
           }
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          spellCheck={false}
-          id={`textarea-${variant}`}
+          variant={variant}
         />
       </div>
 

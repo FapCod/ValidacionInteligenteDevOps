@@ -382,9 +382,39 @@ a:hover { text-decoration: underline; }
   background: rgba(59,130,246,0.06);
 }
 
-.file-textarea {
+.code-editor-container {
+  display: flex;
   flex: 1;
-  min-height: 280px;
+  min-height: 380px;
+  background: transparent;
+  position: relative;
+  overflow: hidden;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.code-editor-gutter {
+  width: 50px;
+  background: rgba(10, 14, 26, 0.4);
+  border-right: 1px solid var(--color-border);
+  padding: 16px 0;
+  text-align: right;
+  user-select: none;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.7;
+  display: flex;
+  flex-direction: column;
+}
+
+.gutter-line-num {
+  padding-right: 12px;
+  height: 1.394rem; /* Sincroniza exactamente con line-height 1.7 de font-size 0.82rem */
+}
+
+.code-editor-textarea {
+  flex: 1;
   background: transparent;
   border: none;
   padding: 16px;
@@ -394,7 +424,12 @@ a:hover { text-decoration: underline; }
   line-height: 1.7;
   resize: vertical;
   outline: none;
-  width: 100%;
+  width: calc(100% - 50px);
+  overflow-y: auto;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 4;
+  -moz-tab-size: 4;
 }
 
 .drop-overlay {
