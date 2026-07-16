@@ -485,7 +485,7 @@ export default function AdminPage() {
                     justifyContent: "space-between",
                     padding: "16px 20px",
                     borderTop: "1px solid var(--color-border)",
-                    background: "rgba(15, 22, 38, 0.5)",
+                    background: "var(--color-bg-secondary)",
                     flexWrap: "wrap",
                     gap: "12px",
                   }}
@@ -621,7 +621,7 @@ export default function AdminPage() {
           {/* Tarjeta de Advertencia e Instrucción */}
           <div
             style={{
-              background: "rgba(30, 41, 59, 0.4)",
+              background: "var(--color-bg-secondary)",
               border: "1px solid var(--color-border)",
               borderRadius: "var(--radius-md)",
               padding: "16px 20px",
@@ -646,19 +646,19 @@ export default function AdminPage() {
                 fontSize: "0.8rem",
               }}
             >
-              <div style={{ background: "rgba(15, 22, 38, 0.4)", padding: "10px", borderRadius: "var(--radius-sm)" }}>
+              <div style={{ background: "var(--color-surface)", border: "1px solid var(--color-border-light)", padding: "10px", borderRadius: "var(--radius-sm)" }}>
                 <code style={{ color: "var(--color-primary)", fontWeight: 600 }}>"valido"</code>
                 <div style={{ color: "var(--color-text-muted)", marginTop: "2px" }}>Booleano (<code style={{ color: "#34d399" }}>true</code> / <code style={{ color: "#f87171" }}>false</code>) obligatorio para el estado final.</div>
               </div>
-              <div style={{ background: "rgba(15, 22, 38, 0.4)", padding: "10px", borderRadius: "var(--radius-sm)" }}>
+              <div style={{ background: "var(--color-surface)", border: "1px solid var(--color-border-light)", padding: "10px", borderRadius: "var(--radius-sm)" }}>
                 <code style={{ color: "var(--color-primary)", fontWeight: 600 }}>"errores_criticos"</code>
                 <div style={{ color: "var(--color-text-muted)", marginTop: "2px" }}>Array de objetos con <code>tipo</code>, <code>descripcion</code> y <code>linea_aproximada</code>.</div>
               </div>
-              <div style={{ background: "rgba(15, 22, 38, 0.4)", padding: "10px", borderRadius: "var(--radius-sm)" }}>
+              <div style={{ background: "var(--color-surface)", border: "1px solid var(--color-border-light)", padding: "10px", borderRadius: "var(--radius-sm)" }}>
                 <code style={{ color: "var(--color-primary)", fontWeight: 600 }}>"advertencias"</code>
                 <div style={{ color: "var(--color-text-muted)", marginTop: "2px" }}>Array de objetos con <code>tipo</code> y <code>descripcion</code> para avisos no bloqueantes.</div>
               </div>
-              <div style={{ background: "rgba(15, 22, 38, 0.4)", padding: "10px", borderRadius: "var(--radius-sm)" }}>
+              <div style={{ background: "var(--color-surface)", border: "1px solid var(--color-border-light)", padding: "10px", borderRadius: "var(--radius-sm)" }}>
                 <code style={{ color: "var(--color-primary)", fontWeight: 600 }}>"resumen"</code>
                 <div style={{ color: "var(--color-text-muted)", marginTop: "2px" }}>Texto de resumen ejecutivo sobre el estado general del análisis.</div>
               </div>

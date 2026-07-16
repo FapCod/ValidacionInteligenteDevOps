@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase";
+import { useTheme } from "@/components/ThemeProvider";
 
 interface AuthFormProps {
   mode: "login" | "register" | "forgot-password";
@@ -12,6 +13,7 @@ interface AuthFormProps {
 
 export default function AuthForm({ mode }: AuthFormProps) {
   const router = useRouter();
+  const { theme, toggleTheme } = useTheme();
   const [nombre, setNombre] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -83,10 +85,57 @@ export default function AuthForm({ mode }: AuthFormProps) {
 
   return (
     <div className="auth-page">
+      {/* Selector de tema flotante en esquina superior derecha */}
+      <div 
+        style={{
+          position: "absolute",
+          top: "24px",
+          right: "24px",
+          zIndex: 10,
+        }}
+      >
+        <button
+          onClick={toggleTheme}
+          type="button"
+          className="btn btn-sm btn-secondary"
+          title={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+          style={{
+            padding: "0",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            borderRadius: "50%",
+            width: "40px",
+            height: "40px",
+            fontSize: "1.2rem",
+            background: "var(--color-surface)",
+            border: "1px solid var(--color-border-light)",
+            boxShadow: "var(--shadow-card)",
+            cursor: "pointer",
+          }}
+        >
+          {theme === "dark" ? "☀️" : "🌙"}
+        </button>
+      </div>
+
       <div className="auth-card">
         {/* Header */}
         <div className="auth-logo">
-          <div className="logo-icon">⚡</div>
+          <div className="logo-icon">
+            <svg
+              viewBox="0 0 24 24"
+              width="18"
+              height="18"
+              fill="white"
+              stroke="white"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ display: "block" }}
+            >
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+            </svg>
+          </div>
           <span style={{ fontWeight: 700, fontSize: "1.1rem" }}>ValidaDoc</span>
         </div>
         <h1 className="auth-title">

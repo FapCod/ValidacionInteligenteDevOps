@@ -162,7 +162,7 @@ export default function HistorialTable({ validaciones, loading, esAdmin = false 
             justifyContent: "space-between",
             padding: "16px 20px",
             borderTop: "1px solid var(--color-border)",
-            background: "rgba(15, 22, 38, 0.5)",
+            background: "var(--color-bg-secondary)",
             flexWrap: "wrap",
             gap: "12px",
           }}
