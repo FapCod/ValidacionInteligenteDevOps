@@ -19,7 +19,7 @@ import { createSupabaseServerClient } from "@/lib/supabase";
 import { validarXml } from "@/lib/xmlValidator";
 import type { ValidarRequestBody } from "@/types";
 
-const MAX_FILE_SIZE_BYTES = 200 * 1024; // 200KB por archivo
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB por archivo
 
 export async function POST(request: NextRequest) {
   // 1. Verificar autenticación — usuario_id viene del JWT, no del body
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
     encoder.encode(contenido_nuevo).length > MAX_FILE_SIZE_BYTES
   ) {
     return NextResponse.json(
-      { error: "El archivo excede el límite máximo de 200KB" },
+      { error: "El archivo excede el límite máximo de 10MB" },
       { status: 413 }
     );
   }

@@ -9,7 +9,7 @@ import { detectFileType, type DetectedType } from "@/lib/detectFileType";
 import ValidationResultPanel from "@/components/ValidationResult";
 import type { SideBySideRow, ValidationResult } from "@/types";
 
-const MAX_SIZE = 200 * 1024; // 200KB
+const MAX_SIZE = 10 * 1024 * 1024; // 10MB
 
 // ─── Diff Side-by-Side Viewer ─────────────────────────────────────────────────
 function DiffViewer({ rows }: { rows: SideBySideRow[] }) {
@@ -147,7 +147,7 @@ function FilePanel({ label, variant, value, onChange, onFileLoad }: FilePanelPro
 
   const handleFile = (file: File) => {
     if (file.size > MAX_SIZE) {
-      alert(`El archivo "${file.name}" excede el límite de 200KB.`);
+      alert(`El archivo "${file.name}" excede el límite de 10MB.`);
       return;
     }
     const reader = new FileReader();
@@ -264,6 +264,8 @@ export default function FileComparator() {
   const [error,     setError]     = useState("");
   const [showDiff,  setShowDiff]  = useState(false);
 
+  const resultRef = useRef<HTMLDivElement>(null);
+
   // Auto-detectar tipo cuando cambia el contenido (pegar texto)
   useEffect(() => {
     const contenido = contenidoNuevo || contenidoAntiguo;
@@ -273,14 +275,15 @@ export default function FileComparator() {
       return;
     }
 
-    const detected = detectFileType(contenido);
+    const detected = detectFileType(contenido, nombreArchivo);
     setDetectedType(detected);
 
     // Solo auto-completar el nombre si el usuario no escribió uno manualmente
-    if (!nombreManual) {
+    // Y si el nombre sugerido es diferente al actual, para prevenir re-renders infinitos
+    if (!nombreManual && nombreArchivo !== detected.filename) {
       setNombreArchivo(detected.filename);
     }
-  }, [contenidoAntiguo, contenidoNuevo, nombreManual]);
+  }, [contenidoAntiguo, contenidoNuevo, nombreManual, nombreArchivo]);
 
   // Cuando el usuario sube un archivo con nombre real → marcar como manual
   const handleFileLoad = (name: string) => {
@@ -290,8 +293,17 @@ export default function FileComparator() {
 
   const handleVerDiff = () => {
     if (!contenidoAntiguo && !contenidoNuevo) return;
-    setDiffRows(computeSideBySideDiff(contenidoAntiguo, contenidoNuevo));
-    setShowDiff(true);
+    
+    if (showDiff) {
+      setShowDiff(false);
+    } else {
+      setDiffRows(computeSideBySideDiff(contenidoAntiguo, contenidoNuevo));
+      setShowDiff(true);
+      // Desplazar al diff tras unos ms de renderizado
+      setTimeout(() => {
+        resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+    }
   };
 
   const handleValidar = async () => {
@@ -303,11 +315,6 @@ export default function FileComparator() {
     setError("");
     setResult(null);
     setLoading(true);
-
-    if (!showDiff) {
-      setDiffRows(computeSideBySideDiff(contenidoAntiguo, contenidoNuevo));
-      setShowDiff(true);
-    }
 
     try {
       const { data: { session } } = await supabaseBrowser.auth.getSession();
@@ -333,17 +340,33 @@ export default function FileComparator() {
       if (response.status === 429) {
         const data = await response.json();
         setError(data.error || "Límite de validaciones alcanzado. Espera un momento.");
+        setTimeout(() => {
+          resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 100);
         return;
       }
       if (!response.ok) {
         const data = await response.json();
         setError(data.error || "Error al validar. Intenta de nuevo.");
+        setTimeout(() => {
+          resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 100);
         return;
       }
 
-      setResult(await response.json());
+      const resData = await response.json();
+      setResult(resData);
+      
+      // Auto-desplazar de forma fluida a los resultados del análisis
+      setTimeout(() => {
+        resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+
     } catch {
       setError("Error de conexión. Verifica tu internet e intenta de nuevo.");
+      setTimeout(() => {
+        resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
     } finally {
       setLoading(false);
     }
@@ -365,25 +388,7 @@ export default function FileComparator() {
 
   return (
     <div>
-      {/* Paneles de archivos */}
-      <div className="comparator-grid">
-        <FilePanel
-          label="producción"
-          variant="old"
-          value={contenidoAntiguo}
-          onChange={setContenidoAntiguo}
-          onFileLoad={handleFileLoad}
-        />
-        <FilePanel
-          label="a desplegar"
-          variant="new"
-          value={contenidoNuevo}
-          onChange={setContenidoNuevo}
-          onFileLoad={handleFileLoad}
-        />
-      </div>
-
-      {/* Fila de acciones */}
+      {/* Fila de acciones (Nombre / Tipo de archivo y botones de control) */}
       <div className="validate-row">
         <div className="form-group file-name-input">
           <label className="form-label" htmlFor="nombre-archivo">
@@ -436,7 +441,7 @@ export default function FileComparator() {
             disabled={!canValidate}
             type="button"
           >
-            👁 Ver Diff
+            {showDiff ? "👁 Ocultar Diff" : "👁 Ver Diff"}
           </button>
 
           <button
@@ -464,19 +469,40 @@ export default function FileComparator() {
         </div>
       </div>
 
-      {/* Error */}
-      {error && (
-        <div className="alert alert-error" role="alert">
-          <span>⚠️</span>
-          <span>{error}</span>
-        </div>
-      )}
+      {/* Paneles de archivos (Antes y Después) */}
+      <div className="comparator-grid">
+        <FilePanel
+          label="producción"
+          variant="old"
+          value={contenidoAntiguo}
+          onChange={setContenidoAntiguo}
+          onFileLoad={handleFileLoad}
+        />
+        <FilePanel
+          label="a desplegar"
+          variant="new"
+          value={contenidoNuevo}
+          onChange={setContenidoNuevo}
+          onFileLoad={handleFileLoad}
+        />
+      </div>
 
-      {/* Diff viewer */}
-      {showDiff && diffRows !== null && <DiffViewer rows={diffRows} />}
+      {/* Contenedor de anclaje para scroll automático */}
+      <div ref={resultRef} style={{ scrollMarginTop: "100px" }}>
+        {/* Error */}
+        {error && (
+          <div className="alert alert-error" role="alert" style={{ marginTop: "16px" }}>
+            <span>⚠️</span>
+            <span>{error}</span>
+          </div>
+        )}
 
-      {/* Resultado IA */}
-      {result && <ValidationResultPanel result={result} />}
+        {/* Resultado IA (Ahora arriba para lectura y scroll inmediato) */}
+        {result && <ValidationResultPanel result={result} />}
+
+        {/* Diff viewer (Abajo para consulta detallada de código) */}
+        {showDiff && diffRows !== null && <DiffViewer rows={diffRows} />}
+      </div>
     </div>
   );
 }

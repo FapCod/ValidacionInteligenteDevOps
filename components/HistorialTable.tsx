@@ -1,6 +1,6 @@
 "use client";
-// components/HistorialTable.tsx
 
+import { useState } from "react";
 import type { Validacion } from "@/types";
 
 interface Props {
@@ -19,6 +19,9 @@ function formatDate(iso: string) {
 }
 
 export default function HistorialTable({ validaciones, loading }: Props) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 8;
+
   if (loading) {
     return (
       <div className="history-table-wrapper">
@@ -64,6 +67,21 @@ export default function HistorialTable({ validaciones, loading }: Props) {
     );
   }
 
+  // Lógica de Paginación
+  const totalItems = validaciones.length;
+  const totalPages = Math.ceil(totalItems / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = validaciones.slice(indexOfFirstItem, indexOfLastItem);
+
+  const handlePrevPage = () => {
+    if (currentPage > 1) setCurrentPage(currentPage - 1);
+  };
+
+  const handleNextPage = () => {
+    if (currentPage < totalPages) setCurrentPage(currentPage + 1);
+  };
+
   return (
     <div className="history-table-wrapper">
       <table className="history-table">
@@ -76,7 +94,7 @@ export default function HistorialTable({ validaciones, loading }: Props) {
           </tr>
         </thead>
         <tbody>
-          {validaciones.map((v) => {
+          {currentItems.map((v) => {
             const erroresCount = v.resultado_ia?.errores?.length ?? 0;
             const advertenciasCount = v.resultado_ia?.advertencias?.length ?? 0;
 
@@ -120,6 +138,70 @@ export default function HistorialTable({ validaciones, loading }: Props) {
           })}
         </tbody>
       </table>
+
+      {/* Paginador Premium */}
+      {totalPages > 1 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "16px 20px",
+            borderTop: "1px solid var(--color-border)",
+            background: "rgba(15, 22, 38, 0.5)",
+            flexWrap: "wrap",
+            gap: "12px",
+          }}
+        >
+          <span style={{ fontSize: "0.8rem", color: "var(--color-text-subtle)" }}>
+            Mostrando <strong>{indexOfFirstItem + 1}</strong> -{" "}
+            <strong>{Math.min(indexOfLastItem, totalItems)}</strong> de{" "}
+            <strong>{totalItems}</strong> registros
+          </span>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <button
+              className="btn btn-sm btn-secondary"
+              onClick={handlePrevPage}
+              disabled={currentPage === 1}
+              style={{
+                opacity: currentPage === 1 ? 0.4 : 1,
+                cursor: currentPage === 1 ? "not-allowed" : "pointer",
+                padding: "6px 12px",
+                fontSize: "0.75rem",
+              }}
+              type="button"
+            >
+              ◀ Anterior
+            </button>
+
+            <span
+              style={{
+                fontSize: "0.8rem",
+                color: "var(--color-text-subtle)",
+                padding: "0 8px",
+              }}
+            >
+              Página <strong>{currentPage}</strong> de <strong>{totalPages}</strong>
+            </span>
+
+            <button
+              className="btn btn-sm btn-secondary"
+              onClick={handleNextPage}
+              disabled={currentPage === totalPages}
+              style={{
+                opacity: currentPage === totalPages ? 0.4 : 1,
+                cursor: currentPage === totalPages ? "not-allowed" : "pointer",
+                padding: "6px 12px",
+                fontSize: "0.75rem",
+              }}
+              type="button"
+            >
+              Siguiente ▶
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -119,7 +119,7 @@ function construirUserPrompt(
   // Esto previene que la IA analice u observe código preexistente/heredado que no ha cambiado.
   const diffLines = computeDiffWithContext(contenidoAntiguo, contenidoNuevo, 4);
 
-  const diffText = diffLines
+  let diffText = diffLines
     .map((line: DiffLine) => {
       const sign = line.type === "added" ? "[AGREGADO]" : line.type === "removed" ? "[ELIMINADO]" : "[CONTEXTO]";
       const oldLineNum = line.lineOld ? `Antiguo L${line.lineOld}` : "";
@@ -129,6 +129,13 @@ function construirUserPrompt(
       return `${sign} (${lineNumStr}): ${line.content}`;
     })
     .join("\n");
+
+  // Truncado de seguridad para controlar el consumo de tokens y prevenir timeouts en archivos masivos.
+  // LIMIT_CHARS (~12,000 caracteres) garantiza que la petición de tokens esté siempre por debajo del límite de Groq/OpenRouter.
+  if (diffText.length > LIMIT_CHARS) {
+    diffText = diffText.slice(0, LIMIT_CHARS) + 
+      "\n\n[... DIFERENCIAS ADICIONALES TRUNCADAS POR CAPACIDAD DE LA IA PARA EVITAR TIMEOUTS ...]";
+  }
 
   let prompt = `Archivo: ${nombreArchivo}
 

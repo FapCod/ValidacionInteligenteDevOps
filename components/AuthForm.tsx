@@ -18,6 +18,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const isLogin = mode === "login";
 
@@ -139,17 +140,42 @@ export default function AuthForm({ mode }: AuthFormProps) {
             <label className="form-label" htmlFor="password">
               Contraseña
             </label>
-            <input
-              id="password"
-              type="password"
-              className="form-input"
-              placeholder={isLogin ? "••••••••" : "Mínimo 6 caracteres"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={6}
-              autoComplete={isLogin ? "current-password" : "new-password"}
-            />
+            <div style={{ position: "relative", width: "100%" }}>
+              <input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                className="form-input"
+                style={{ paddingRight: "45px", width: "100%" }}
+                placeholder={isLogin ? "••••••••" : "Mínimo 6 caracteres"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={6}
+                autoComplete={isLogin ? "current-password" : "new-password"}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  position: "absolute",
+                  right: "12px",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "transparent",
+                  border: "none",
+                  fontSize: "1.1rem",
+                  cursor: "pointer",
+                  color: "var(--color-text-subtle)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "4px"
+                }}
+                title={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+              >
+                {showPassword ? "🙈" : "👁️"}
+              </button>
+            </div>
           </div>
 
           <button

@@ -31,10 +31,10 @@
   --color-text-muted:   #64748b;
   --color-text-subtle:  #94a3b8;
 
-  --color-diff-added:   rgba(16,185,129,0.15);
-  --color-diff-removed: rgba(239,68,68,0.15);
-  --color-diff-added-border: rgba(16,185,129,0.5);
-  --color-diff-removed-border: rgba(239,68,68,0.5);
+  --color-diff-added:   rgba(16,185,129,0.28);
+  --color-diff-removed: rgba(239,68,68,0.28);
+  --color-diff-added-border: rgba(16,185,129,0.9);
+  --color-diff-removed-border: rgba(239,68,68,0.9);
 
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -384,8 +384,8 @@ a:hover { text-decoration: underline; }
 
 .code-editor-container {
   display: flex;
-  flex: 1;
-  min-height: 380px;
+  align-items: stretch;
+  height: 400px;
   background: transparent;
   position: relative;
   overflow: hidden;
@@ -394,6 +394,7 @@ a:hover { text-decoration: underline; }
 
 .code-editor-gutter {
   width: 50px;
+  flex-shrink: 0;
   background: rgba(10, 14, 26, 0.4);
   border-right: 1px solid var(--color-border);
   padding: 16px 0;
@@ -415,6 +416,7 @@ a:hover { text-decoration: underline; }
 
 .code-editor-textarea {
   flex: 1;
+  min-width: 0;
   background: transparent;
   border: none;
   padding: 16px;
@@ -422,9 +424,8 @@ a:hover { text-decoration: underline; }
   font-family: var(--font-mono);
   font-size: 0.82rem;
   line-height: 1.7;
-  resize: vertical;
+  resize: none;
   outline: none;
-  width: calc(100% - 50px);
   overflow-y: auto;
   overflow-x: auto;
   white-space: pre;
@@ -563,7 +564,7 @@ a:hover { text-decoration: underline; }
 .diff-col-header.old {
   color: #f87171;
   background: rgba(239,68,68,0.06);
-  border-right: 1px solid var(--color-border);
+  border-right: 1.5px solid var(--color-border-light);
 }
 .diff-col-header.new {
   color: #34d399;
@@ -595,7 +596,7 @@ a:hover { text-decoration: underline; }
 .diff-sbs-cell {
   display: flex;
   align-items: stretch;
-  border-right: 1px solid var(--color-border);
+  border-right: 1.5px solid var(--color-border-light);
   min-width: 0;
 }
 .diff-sbs-cell:last-child { border-right: none; }
@@ -628,8 +629,22 @@ a:hover { text-decoration: underline; }
   flex: 1;
   padding: 2px 8px;
   white-space: pre;
-  overflow: hidden;
+  overflow-x: auto;
   color: var(--color-text);
+}
+/* Scrollbar horizontal fino y premium para celdas de código */
+.sbs-content::-webkit-scrollbar {
+  height: 4px;
+}
+.sbs-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sbs-content::-webkit-scrollbar-thumb {
+  background: var(--color-border-light);
+  border-radius: 2px;
+}
+.sbs-content::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary);
 }
 
 /* Estados de color por tipo */

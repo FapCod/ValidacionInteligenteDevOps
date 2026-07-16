@@ -10,22 +10,47 @@ export interface DetectedType {
   color: string;       // Color CSS para la badge
 }
 
-/**
- * Analiza el contenido de texto y devuelve el tipo detectado.
- * El orden importa: se verifica del más específico al más genérico.
- */
-export function detectFileType(content: string): DetectedType {
+export function detectFileType(content: string, filename?: string): DetectedType {
   const text = content.trim();
+
+  // Si hay un nombre de archivo, priorizar la extensión ya que es la verdad absoluta del sistema de archivos
+  if (filename && filename.trim()) {
+    const cleanName = filename.trim().toLowerCase();
+    const ext = cleanName.split(".").pop();
+
+    if (ext === "sql" || ext === "sp" || ext === "proc") {
+      return TYPES.sql;
+    }
+    if (ext === "xml" || ext === "config" || ext === "csproj") {
+      return TYPES.xml;
+    }
+    if (ext === "json") {
+      return TYPES.json;
+    }
+    if (ext === "yaml" || ext === "yml") {
+      return TYPES.yaml;
+    }
+    if (ext === "env" || cleanName.includes(".env")) {
+      return TYPES.env;
+    }
+    if (ext === "ini" || ext === "properties") {
+      return TYPES.ini;
+    }
+    if (ext === "txt") {
+      return TYPES.txt;
+    }
+  }
+
   if (!text) return TYPES.unknown;
 
-  // 1. SQL — Stored Procedures y scripts SQL
-  if (isSql(text))        return TYPES.sql;
-
-  // 2. XML / web.config / app.config
+  // 1. XML / web.config / app.config (Estructura muy específica e inequívoca)
   if (isXml(text))        return TYPES.xml;
 
-  // 3. JSON (appsettings.json, package.json, etc.)
+  // 2. JSON (appsettings.json, package.json, etc. - Sintaxis exacta)
   if (isJson(text))       return TYPES.json;
+
+  // 3. SQL — Stored Procedures y scripts SQL (Heurística de palabras clave)
+  if (isSql(text))        return TYPES.sql;
 
   // 4. YAML (.yml / .yaml)
   if (isYaml(text))       return TYPES.yaml;
