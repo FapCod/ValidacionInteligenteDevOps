@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import AuthForm from "@/components/AuthForm";
 
 export const metadata: Metadata = {
-  title: "Iniciar sesión — ValidaConfig",
+  title: "Iniciar sesión — ValidaDoc",
   description: "Accede a tu cuenta para validar archivos de configuración con IA",
 };
 

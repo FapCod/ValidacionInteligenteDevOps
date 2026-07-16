@@ -11,6 +11,34 @@ import type { SideBySideRow, ValidationResult } from "@/types";
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10MB
 
+// Helper para visualizar y resaltar espacios en blanco al final de la línea
+function highlightWhitespaces(text: string) {
+  if (!text) return "";
+
+  const trailingSpaceRegex = /(\s+)$/;
+  const match = text.match(trailingSpaceRegex);
+
+  if (match) {
+    const trailingSpaces = match[1];
+    const mainText = text.slice(0, -trailingSpaces.length);
+    const spaceVisual = "·".repeat(trailingSpaces.length);
+
+    return (
+      <>
+        {mainText}
+        <span 
+          className="highlight-space" 
+          title={`${trailingSpaces.length} espacio(s) en blanco al final`}
+        >
+          {spaceVisual}
+        </span>
+      </>
+    );
+  }
+
+  return text;
+}
+
 // ─── Diff Side-by-Side Viewer ─────────────────────────────────────────────────
 function DiffViewer({ rows }: { rows: SideBySideRow[] }) {
   const addedCount   = rows.filter((r) => r.right.type === "added").length;
@@ -18,6 +46,8 @@ function DiffViewer({ rows }: { rows: SideBySideRow[] }) {
 
   const signFor = (type: string) =>
     type === "added" ? "+" : type === "removed" ? "−" : " ";
+
+  const isIdentical = addedCount === 0 && removedCount === 0;
 
   return (
     <div className="diff-viewer">
@@ -29,17 +59,27 @@ function DiffViewer({ rows }: { rows: SideBySideRow[] }) {
         </div>
       </div>
 
-      {rows.length === 0 ? (
+      {isIdentical ? (
         <div
           style={{
-            padding: "32px",
+            padding: "48px 32px",
             textAlign: "center",
             color: "var(--color-text-muted)",
-            fontFamily: "var(--font-mono)",
-            fontSize: "0.85rem",
+            fontFamily: "var(--font-sans)",
+            fontSize: "0.9rem",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "12px",
           }}
         >
-          Los archivos son idénticos — no hay diferencias
+          <span style={{ fontSize: "2rem" }}>✨</span>
+          <span style={{ fontWeight: 600, color: "var(--color-text-subtle)" }}>
+            Los archivos son idénticos
+          </span>
+          <span style={{ fontSize: "0.8rem", opacity: 0.8 }}>
+            No se han encontrado diferencias ni cambios de código.
+          </span>
         </div>
       ) : (
         <>
@@ -55,14 +95,14 @@ function DiffViewer({ rows }: { rows: SideBySideRow[] }) {
                   <div className="sbs-sign">
                     {row.left.type === "empty" ? "" : signFor(row.left.type)}
                   </div>
-                  <div className="sbs-content">{row.left.content}</div>
+                  <div className="sbs-content">{highlightWhitespaces(row.left.content)}</div>
                 </div>
                 <div className={`diff-sbs-cell ${row.right.type}`}>
                   <div className="sbs-num">{row.right.lineNum ?? ""}</div>
                   <div className="sbs-sign">
                     {row.right.type === "empty" ? "" : signFor(row.right.type)}
                   </div>
-                  <div className="sbs-content">{row.right.content}</div>
+                  <div className="sbs-content">{highlightWhitespaces(row.right.content)}</div>
                 </div>
               </div>
             ))}
@@ -263,8 +303,11 @@ export default function FileComparator() {
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState("");
   const [showDiff,  setShowDiff]  = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   const resultRef = useRef<HTMLDivElement>(null);
+
+  const canValidate = contenidoAntiguo.trim() && contenidoNuevo.trim();
 
   // Auto-detectar tipo cuando cambia el contenido (pegar texto)
   useEffect(() => {
@@ -291,13 +334,29 @@ export default function FileComparator() {
     setNombreManual(true);
   };
 
+  // Ocultar el diff automáticamente si no se pueden validar los archivos
+  useEffect(() => {
+    if (!canValidate && showDiff) {
+      setShowDiff(false);
+      setDiffRows(null);
+    }
+  }, [canValidate, showDiff]);
+
+  // Recalcular o limpiar diff de forma reactiva
+  useEffect(() => {
+    if (showDiff && canValidate) {
+      setDiffRows(computeSideBySideDiff(contenidoAntiguo, contenidoNuevo));
+    } else if (!showDiff) {
+      setDiffRows(null);
+    }
+  }, [contenidoAntiguo, contenidoNuevo, showDiff, canValidate]);
+
   const handleVerDiff = () => {
-    if (!contenidoAntiguo && !contenidoNuevo) return;
+    if (!canValidate) return;
     
     if (showDiff) {
       setShowDiff(false);
     } else {
-      setDiffRows(computeSideBySideDiff(contenidoAntiguo, contenidoNuevo));
       setShowDiff(true);
       // Desplazar al diff tras unos ms de renderizado
       setTimeout(() => {
@@ -384,8 +443,6 @@ export default function FileComparator() {
     setShowDiff(false);
   };
 
-  const canValidate = contenidoAntiguo.trim() && contenidoNuevo.trim();
-
   return (
     <div>
       {/* Fila de acciones (Nombre / Tipo de archivo y botones de control) */}
@@ -446,7 +503,7 @@ export default function FileComparator() {
 
           <button
             className="btn btn-primary btn-lg"
-            onClick={handleValidar}
+            onClick={() => setShowConfirmModal(true)}
             disabled={!canValidate || loading}
             id="btn-validar"
             type="button"
@@ -503,6 +560,60 @@ export default function FileComparator() {
         {/* Diff viewer (Abajo para consulta detallada de código) */}
         {showDiff && diffRows !== null && <DiffViewer rows={diffRows} />}
       </div>
+
+      {/* Modal de Confirmación de IA */}
+      {showConfirmModal && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-header">
+              <span className="modal-icon">🤖</span>
+              <h3 className="modal-title">¿Validar con IA o ver Diff?</h3>
+            </div>
+            <p className="modal-text">
+              La validación con IA realiza un análisis semántico de seguridad y sintaxis que consume cuota de tokens. Si solo necesitas comparar las diferencias de código visualmente, puedes usar <strong>Ver Diff</strong>.
+            </p>
+            <div className="modal-actions">
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  setShowConfirmModal(false);
+                  handleValidar();
+                }}
+                type="button"
+              >
+                ⚡ Validar con IA
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => {
+                  setShowConfirmModal(false);
+                  if (!showDiff) {
+                    handleVerDiff();
+                  }
+                }}
+                type="button"
+              >
+                👁️ Solo ver Diff
+              </button>
+              <button
+                className="btn btn-text"
+                onClick={() => setShowConfirmModal(false)}
+                type="button"
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--color-text-muted)",
+                  cursor: "pointer",
+                  fontSize: "0.85rem",
+                  padding: "6px 12px"
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -21,6 +21,10 @@ export interface Validacion {
   resultado_ia: ValidationResult;
   es_valido: boolean;
   created_at: string;
+  usuario?: {
+    nombre: string;
+    email: string;
+  };
 }
 
 export interface Usuario {
@@ -46,4 +50,12 @@ export interface ValidarRequestBody {
 export interface ApiError {
   error: string;
   code?: string;
+}
+
+export interface ReporteConsumoUsuario {
+  usuario_id: string;
+  nombre: string;
+  email: string;
+  total_consultas: number;
+  tokens_estimados: number;
 }

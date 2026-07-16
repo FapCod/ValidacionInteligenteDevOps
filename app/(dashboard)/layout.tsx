@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabaseBrowser } from "@/lib/supabase";
+import { supabaseBrowser, getBrowserClient } from "@/lib/supabase";
 import Navbar from "@/components/Navbar";
 import type { User } from "@supabase/supabase-js";
 
@@ -15,15 +15,32 @@ export default function DashboardLayout({
 }) {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
+  const [esAdmin, setEsAdmin] = useState(false);
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
     // Verificar sesión activa
-    supabaseBrowser.auth.getSession().then(({ data: { session } }) => {
+    supabaseBrowser.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) {
         router.replace("/login");
       } else {
         setUser(session.user);
+
+        // Consultar es_admin desde la tabla usuarios
+        try {
+          const { data } = await getBrowserClient()
+            .from("usuarios")
+            .select("es_admin")
+            .eq("id", session.user.id)
+            .single();
+          
+          if (data?.es_admin) {
+            setEsAdmin(true);
+          }
+        } catch (err) {
+          console.error("Error al obtener perfil de usuario:", err);
+        }
+
         setChecking(false);
       }
     });
@@ -31,11 +48,25 @@ export default function DashboardLayout({
     // Escuchar cambios de sesión (logout desde otra pestaña, etc.)
     const {
       data: { subscription },
-    } = supabaseBrowser.auth.onAuthStateChange((_event, session) => {
+    } = supabaseBrowser.auth.onAuthStateChange(async (_event, session) => {
       if (!session) {
         router.replace("/login");
+        setEsAdmin(false);
       } else {
         setUser(session.user);
+
+        // Consultar es_admin tras cambio de sesión
+        try {
+          const { data } = await getBrowserClient()
+            .from("usuarios")
+            .select("es_admin")
+            .eq("id", session.user.id)
+            .single();
+          
+          setEsAdmin(!!data?.es_admin);
+        } catch {
+          setEsAdmin(false);
+        }
       }
     });
 
@@ -73,7 +104,7 @@ export default function DashboardLayout({
 
   return (
     <div className="page-wrapper">
-      <Navbar userEmail={user?.email} />
+      <Navbar userEmail={user?.email} esAdmin={esAdmin} />
       <main className="main-content">{children}</main>
     </div>
   );

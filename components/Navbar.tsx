@@ -8,9 +8,10 @@ import { useState } from "react";
 
 interface NavbarProps {
   userEmail?: string;
+  esAdmin?: boolean;
 }
 
-export default function Navbar({ userEmail }: NavbarProps) {
+export default function Navbar({ userEmail, esAdmin = false }: NavbarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
@@ -44,6 +45,14 @@ export default function Navbar({ userEmail }: NavbarProps) {
           >
             📋 Historial
           </Link>
+          {esAdmin && (
+            <Link
+              href="/admin"
+              className={`nav-link ${pathname === "/admin" ? "active" : ""}`}
+            >
+              🛡️ Admin
+            </Link>
+          )}
         </div>
 
         {/* User info + Sign out */}

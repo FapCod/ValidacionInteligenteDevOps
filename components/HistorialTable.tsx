@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { Validacion } from "@/types";
 
 interface Props {
   validaciones: Partial<Validacion>[];
   loading?: boolean;
+  esAdmin?: boolean;
 }
 
 function formatDate(iso: string) {
@@ -18,9 +19,13 @@ function formatDate(iso: string) {
   }).format(new Date(iso));
 }
 
-export default function HistorialTable({ validaciones, loading }: Props) {
+export default function HistorialTable({ validaciones, loading, esAdmin = false }: Props) {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 8;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [validaciones]);
 
   if (loading) {
     return (
@@ -28,6 +33,7 @@ export default function HistorialTable({ validaciones, loading }: Props) {
         <table className="history-table">
           <thead>
             <tr>
+              {esAdmin && <th>Usuario</th>}
               <th>Archivo</th>
               <th>Estado</th>
               <th>Errores</th>
@@ -37,11 +43,11 @@ export default function HistorialTable({ validaciones, loading }: Props) {
           <tbody>
             {Array.from({ length: 5 }).map((_, i) => (
               <tr key={i}>
-                {Array.from({ length: 4 }).map((_, j) => (
+                {Array.from({ length: esAdmin ? 5 : 4 }).map((_, j) => (
                   <td key={j}>
                     <div
                       className="skeleton"
-                      style={{ height: "16px", width: j === 0 ? "180px" : "80px" }}
+                      style={{ height: "16px", width: j === 0 && esAdmin ? "140px" : j === 1 && esAdmin ? "180px" : j === 0 ? "180px" : "80px" }}
                     />
                   </td>
                 ))}
@@ -87,6 +93,7 @@ export default function HistorialTable({ validaciones, loading }: Props) {
       <table className="history-table">
         <thead>
           <tr>
+            {esAdmin && <th>Usuario</th>}
             <th>Archivo</th>
             <th>Estado</th>
             <th>Errores / Advertencias</th>
@@ -100,6 +107,13 @@ export default function HistorialTable({ validaciones, loading }: Props) {
 
             return (
               <tr key={v.id}>
+                {esAdmin && (
+                  <td>
+                    <span style={{ fontSize: "0.82rem", fontWeight: 500 }} title={v.usuario?.email}>
+                      {v.usuario?.nombre || v.usuario?.email?.split("@")[0] || "—"}
+                    </span>
+                  </td>
+                )}
                 <td>
                   <span className="file-name-cell">
                     {v.nombre_archivo ?? "—"}

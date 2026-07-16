@@ -25,19 +25,46 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Error de autenticación" }, { status: 401 });
   }
 
-  // 2. Consultar solo las validaciones del usuario autenticado
-  // Aunque usemos service_role, filtramos explícitamente por usuario_id
-  // como defensa en profundidad (no confiamos solo en RLS)
+  // 2. Consultar base de datos
   const supabase = createSupabaseServerClient();
 
-  const { data, error } = await supabase
+  // 2a. Verificar si el usuario es administrador
+  const { data: usuarioData, error: usuarioError } = await supabase
+    .from("usuarios")
+    .select("es_admin")
+    .eq("id", user.id)
+    .single();
+
+  const esAdmin = !usuarioError && usuarioData?.es_admin === true;
+
+  // 2b. Construir la consulta. Si es admin, traemos todas las validaciones e
+  // incluimos los datos del usuario que la realizó (JOIN).
+  let query = supabase
     .from("validaciones")
-    .select(
-      "id, nombre_archivo, resultado_ia, es_valido, created_at"
-      // Excluimos contenido_antiguo y contenido_nuevo del listado (pueden ser grandes)
-      // Se pueden obtener en un endpoint de detalle si se necesitan
-    )
-    .eq("usuario_id", user.id) // Filtro explícito por usuario
+    .select(`
+      id,
+      nombre_archivo,
+      resultado_ia,
+      es_valido,
+      created_at,
+      usuario:usuarios (
+        nombre,
+        email
+      )
+    `);
+
+  const { searchParams } = new URL(request.url);
+  const targetUsuarioId = searchParams.get("usuario_id");
+
+  if (esAdmin && targetUsuarioId) {
+    // Si es admin y se especifica un usuario objetivo, filtramos por él
+    query = query.eq("usuario_id", targetUsuarioId);
+  } else {
+    // Si no es admin, o si es admin consultando su propio historial, filtramos por su ID
+    query = query.eq("usuario_id", user.id);
+  }
+
+  const { data, error } = await query
     .order("created_at", { ascending: false })
     .limit(50);
 
@@ -49,7 +76,10 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  return NextResponse.json({ validaciones: data ?? [] });
+  return NextResponse.json({
+    validaciones: data ?? [],
+    esAdmin
+  });
 }
 
 // Solo se acepta GET

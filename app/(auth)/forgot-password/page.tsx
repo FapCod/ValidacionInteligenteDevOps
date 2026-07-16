@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import AuthForm from "@/components/AuthForm";
 
 export const metadata: Metadata = {
-  title: "Recuperar contraseña — ValidaConfig",
+  title: "Recuperar contraseña — ValidaDoc",
   description: "Restablece tu contraseña para volver a validar tus archivos de configuración",
 };
 

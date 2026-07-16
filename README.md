@@ -1,4 +1,4 @@
-# ValidaConfig — Validación Inteligente de Configuraciones DevOps
+# ValidaDoc — Validación Inteligente de Configuraciones DevOps
 
 Aplicación web para comparar archivos de configuración (web.config, appsettings.json, .env, etc.) y detectar errores con IA (Google Gemini) antes de hacer pases a producción.
 
@@ -73,7 +73,7 @@ git push -u origin main
 2. Click en **New → Web Service**
 3. Conecta tu repositorio de GitHub
 4. Configura:
-   - **Name**: `validaconfig`
+   - **Name**: `validadoc`
    - **Region**: Oregon (US West) o la más cercana
    - **Branch**: `main`
    - **Runtime**: Node
