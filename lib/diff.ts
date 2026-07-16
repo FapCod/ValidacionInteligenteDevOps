@@ -9,7 +9,11 @@ import type { DiffLine } from "@/types";
  * Cada línea tiene su tipo (equal, added, removed) y número de línea.
  */
 export function computeDiff(oldText: string, newText: string): DiffLine[] {
-  const changes = diffLines(oldText, newText);
+  // Normalizar saltos de línea para evitar diferencias por CRLF vs LF (Windows vs Unix)
+  const cleanOld = oldText.replace(/\r\n/g, "\n");
+  const cleanNew = newText.replace(/\r\n/g, "\n");
+
+  const changes = diffLines(cleanOld, cleanNew);
   const result: DiffLine[] = [];
 
   let lineOld = 1;
@@ -72,31 +76,47 @@ export function computeSideBySideDiff(
         right: { lineNum: line.lineNew, content: line.content, type: "equal" },
       });
       i++;
-
-    } else if (line.type === "removed") {
-      // Si la siguiente línea es "added", emparejarlas en la misma fila
-      const next = lines[i + 1];
-      if (next && next.type === "added") {
-        rows.push({
-          left:  { lineNum: line.lineOld, content: line.content,  type: "removed" },
-          right: { lineNum: next.lineNew, content: next.content,   type: "added" },
-        });
-        i += 2;
-      } else {
-        rows.push({
-          left:  { lineNum: line.lineOld, content: line.content, type: "removed" },
-          right: { lineNum: null,         content: "",            type: "empty" },
-        });
+    } else {
+      // Agrupar todas las líneas eliminadas contiguas
+      const removedBlock: DiffLine[] = [];
+      while (i < lines.length && lines[i].type === "removed") {
+        removedBlock.push(lines[i]);
         i++;
       }
 
-    } else {
-      // type === "added" sin removed previo
-      rows.push({
-        left:  { lineNum: null,         content: "",           type: "empty" },
-        right: { lineNum: line.lineNew, content: line.content, type: "added" },
-      });
-      i++;
+      // Agrupar todas las líneas agregadas contiguas que le siguen
+      const addedBlock: DiffLine[] = [];
+      while (i < lines.length && lines[i].type === "added") {
+        addedBlock.push(lines[i]);
+        i++;
+      }
+
+      // Emparejar uno a uno hasta donde sea posible
+      const maxLen = Math.max(removedBlock.length, addedBlock.length);
+      for (let j = 0; j < maxLen; j++) {
+        const rem = removedBlock[j];
+        const add = addedBlock[j];
+
+        if (rem && add) {
+          // Ambos existen -> se emparejan en la misma fila para inline diff
+          rows.push({
+            left:  { lineNum: rem.lineOld, content: rem.content, type: "removed" },
+            right: { lineNum: add.lineNew, content: add.content, type: "added" },
+          });
+        } else if (rem) {
+          // Solo queda eliminada
+          rows.push({
+            left:  { lineNum: rem.lineOld, content: rem.content, type: "removed" },
+            right: { lineNum: null,        content: "",          type: "empty" },
+          });
+        } else if (add) {
+          // Solo queda agregada
+          rows.push({
+            left:  { lineNum: null,        content: "",          type: "empty" },
+            right: { lineNum: add.lineNew, content: add.content, type: "added" },
+          });
+        }
+      }
     }
   }
 
