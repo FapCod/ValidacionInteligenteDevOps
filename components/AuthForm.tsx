@@ -7,7 +7,7 @@ import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase";
 
 interface AuthFormProps {
-  mode: "login" | "register";
+  mode: "login" | "register" | "forgot-password";
 }
 
 export default function AuthForm({ mode }: AuthFormProps) {
@@ -21,6 +21,8 @@ export default function AuthForm({ mode }: AuthFormProps) {
   const [showPassword, setShowPassword] = useState(false);
 
   const isLogin = mode === "login";
+  const isRegister = mode === "register";
+  const isForgotPassword = mode === "forgot-password";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,7 +39,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
         if (error) throw error;
         router.push("/validar");
         router.refresh();
-      } else {
+      } else if (isRegister) {
         const { error } = await supabaseBrowser.auth.signUp({
           email,
           password,
@@ -48,6 +50,15 @@ export default function AuthForm({ mode }: AuthFormProps) {
         if (error) throw error;
         setSuccessMsg(
           "¡Cuenta creada! Revisa tu email para confirmar tu cuenta, luego inicia sesión."
+        );
+      } else {
+        // mode === "forgot-password"
+        const { error } = await supabaseBrowser.auth.resetPasswordForEmail(email, {
+          redirectTo: `${window.location.origin}/update-password`,
+        });
+        if (error) throw error;
+        setSuccessMsg(
+          "¡Enlace enviado! Revisa tu correo electrónico para restablecer tu contraseña."
         );
       }
     } catch (err: unknown) {
@@ -78,11 +89,17 @@ export default function AuthForm({ mode }: AuthFormProps) {
           <span style={{ fontWeight: 700, fontSize: "1.1rem" }}>ValidaDoc</span>
         </div>
         <h1 className="auth-title">
-          {isLogin ? "Bienvenido de vuelta" : "Crear cuenta"}
+          {isLogin
+            ? "Bienvenido de vuelta"
+            : isForgotPassword
+            ? "Recuperar contraseña"
+            : "Crear cuenta"}
         </h1>
         <p className="auth-subtitle">
           {isLogin
             ? "Ingresa tus credenciales para continuar"
+            : isForgotPassword
+            ? "Te enviaremos un enlace a tu correo para restablecer tu contraseña"
             : "Empieza a validar tus configuraciones con IA"}
         </p>
 
@@ -102,7 +119,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
 
         {/* Form */}
         <form className="auth-form" onSubmit={handleSubmit} noValidate>
-          {!isLogin && (
+          {isRegister && (
             <div className="form-group">
               <label className="form-label" htmlFor="nombre">
                 Nombre
@@ -114,7 +131,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
                 placeholder="Tu nombre"
                 value={nombre}
                 onChange={(e) => setNombre(e.target.value)}
-                required={!isLogin}
+                required={isRegister}
                 autoComplete="name"
               />
             </div>
@@ -136,61 +153,81 @@ export default function AuthForm({ mode }: AuthFormProps) {
             />
           </div>
 
-          <div className="form-group">
-            <label className="form-label" htmlFor="password">
-              Contraseña
-            </label>
-            <div style={{ position: "relative", width: "100%" }}>
-              <input
-                id="password"
-                type={showPassword ? "text" : "password"}
-                className="form-input"
-                style={{ paddingRight: "45px", width: "100%" }}
-                placeholder={isLogin ? "••••••••" : "Mínimo 6 caracteres"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={6}
-                autoComplete={isLogin ? "current-password" : "new-password"}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                style={{
-                  position: "absolute",
-                  right: "12px",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  background: "transparent",
-                  border: "none",
-                  fontSize: "1.1rem",
-                  cursor: "pointer",
-                  color: "var(--color-text-subtle)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: "4px"
-                }}
-                title={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
-              >
-                {showPassword ? "🙈" : "👁️"}
-              </button>
+          {!isForgotPassword && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="password">
+                Contraseña
+              </label>
+              <div style={{ position: "relative", width: "100%" }}>
+                <input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  className="form-input"
+                  style={{ paddingRight: "45px", width: "100%" }}
+                  placeholder={isLogin ? "••••••••" : "Mínimo 6 caracteres"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  autoComplete={isLogin ? "current-password" : "new-password"}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  style={{
+                    position: "absolute",
+                    right: "12px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    background: "transparent",
+                    border: "none",
+                    fontSize: "1.1rem",
+                    cursor: "pointer",
+                    color: "var(--color-text-subtle)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "4px"
+                  }}
+                  title={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                >
+                  {showPassword ? "🙈" : "👁️"}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
+
+          {isLogin && (
+            <div style={{ textAlign: "right", marginTop: "-8px", marginBottom: "16px" }}>
+              <Link
+                href="/forgot-password"
+                style={{ fontSize: "0.8rem", color: "var(--color-primary)", textDecoration: "none" }}
+              >
+                ¿Olvidaste tu contraseña?
+              </Link>
+            </div>
+          )}
 
           <button
             type="submit"
             className="btn btn-primary btn-lg"
             disabled={loading}
-            id={isLogin ? "btn-login" : "btn-register"}
+            id={isLogin ? "btn-login" : isForgotPassword ? "btn-reset" : "btn-register"}
+            style={{ width: "100%" }}
           >
             {loading ? (
               <>
                 <span className="spinner" />
-                {isLogin ? "Ingresando..." : "Creando cuenta..."}
+                {isLogin
+                  ? "Ingresando..."
+                  : isForgotPassword
+                  ? "Enviando..."
+                  : "Creando cuenta..."}
               </>
             ) : isLogin ? (
               "Iniciar sesión"
+            ) : isForgotPassword ? (
+              "Enviar enlace de recuperación"
             ) : (
               "Crear cuenta"
             )}
@@ -203,6 +240,11 @@ export default function AuthForm({ mode }: AuthFormProps) {
             <>
               ¿No tienes cuenta?{" "}
               <Link href="/register">Regístrate gratis</Link>
+            </>
+          ) : isForgotPassword ? (
+            <>
+              ¿Recordaste tu contraseña?{" "}
+              <Link href="/login">Inicia sesión</Link>
             </>
           ) : (
             <>
