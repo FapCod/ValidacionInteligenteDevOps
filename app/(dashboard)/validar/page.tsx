@@ -39,6 +39,48 @@ export default function ValidarPage() {
         </p>
       </div>
 
+      {/* Selector de Modo */}
+      <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+        <button
+          className="btn btn-primary"
+          style={{ fontSize: "0.85rem", padding: "8px 16px", borderRadius: "var(--radius-md)" }}
+          type="button"
+        >
+          🔍 Validar Archivo
+        </button>
+        
+        <button
+          className="btn btn-secondary"
+          style={{
+            fontSize: "0.85rem",
+            padding: "8px 16px",
+            opacity: 0.5,
+            cursor: "not-allowed",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            borderRadius: "var(--radius-md)"
+          }}
+          type="button"
+          disabled
+          title="Función de validación masiva en lote (Próximamente)"
+        >
+          📦 Validación Masiva 
+          <span 
+            style={{ 
+              fontSize: "0.68rem", 
+              background: "var(--color-primary-glow)", 
+              color: "var(--color-primary)", 
+              padding: "1px 6px", 
+              borderRadius: "10px", 
+              fontWeight: 700 
+            }}
+          >
+            Próximamente
+          </span>
+        </button>
+      </div>
+
       <FileComparator />
     </div>
   );

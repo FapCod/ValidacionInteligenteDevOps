@@ -622,7 +622,7 @@ export default function FileComparator() {
         )}
 
         {/* Resultado IA (Ahora arriba para lectura y scroll inmediato) */}
-        {result && <ValidationResultPanel result={result} />}
+        {result && <ValidationResultPanel result={result} nombreArchivo={nombreArchivo || detectedType?.filename || "archivo"} />}
 
         {/* Diff viewer (Abajo para consulta detallada de código) */}
         {showDiff && diffRows !== null && <DiffViewer rows={diffRows} />}
