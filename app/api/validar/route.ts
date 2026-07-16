@@ -117,25 +117,48 @@ export async function POST(request: NextRequest) {
     const xmlCheck = validarXml(contenido_nuevo);
     if (!xmlCheck.valido) {
       let reporteError = "";
+      const lineaError = xmlCheck.linea;
 
       if (xmlCheck.tipo === "sin_cerrar" && xmlCheck.tagMalo) {
-        // Sugerir la corrección agregando ' />' al final
         const tagSugerido = xmlCheck.tagMalo.endsWith("/") 
           ? xmlCheck.tagMalo 
           : `${xmlCheck.tagMalo} />`;
 
         reporteError = `### 🔴 Error Crítico de Sintaxis (Bloquea el Despliegue)
-**Problema:** Falta el cierre de etiqueta \`/>\` o \`>\` en la línea ${xmlCheck.linea} para la etiqueta \`${xmlCheck.tagMalo}\`.
+**Problema:** Falta el cierre de etiqueta \`/>\` o \`>\` en la **línea ${lineaError}** para la etiqueta \`${xmlCheck.tagMalo}\`.
 **Impacto:** IIS no podrá parsear el archivo de configuración. La aplicación se caerá inmediatamente al desplegarse con un error \`HTTP Error 500.19 - Internal Server Error\`.
-**Solución:** Corrige el cierre de la etiqueta en la línea ${xmlCheck.linea} para que quede bien construida:
+**Solución:** Corrige el cierre de la etiqueta en la **línea ${lineaError}** para que quede bien construida:
 \`\`\`xml
 ${tagSugerido}
 \`\`\``;
-      } else {
+      } else if (xmlCheck.tipo === "abierto_final" && xmlCheck.nombreTag) {
+        // Encontrar la línea donde se abrió originalmente ese tag
+        let lineaApertura = 0;
+        const indexApertura = contenido_nuevo.lastIndexOf(`<${xmlCheck.nombreTag}`);
+        if (indexApertura !== -1) {
+          lineaApertura = contenido_nuevo.substring(0, indexApertura).split("\n").length;
+        }
+
+        const ubicacionStr = lineaApertura > 0 
+          ? `en la **línea ${lineaApertura}**` 
+          : "dentro del archivo";
+
         reporteError = `### 🔴 Error Crítico de Sintaxis (Bloquea el Despliegue)
-**Detalle:** ${xmlCheck.error || "XML mal formado"}
+**Problema:** La etiqueta \`<${xmlCheck.nombreTag}>\` abierta ${ubicacionStr} no tiene una etiqueta de cierre correspondientes (\`</${xmlCheck.nombreTag}>\`) antes del final del documento.
+**Impacto:** Error de configuración crítico. El servidor web rechazará el archivo como mal formado.
+**Solución:** Agrega la etiqueta de cierre \`</${xmlCheck.nombreTag}>\` al final o en la línea de cierre correspondiente del archivo.`;
+      } else if (xmlCheck.tipo === "cruzado" && xmlCheck.nombreTag) {
+        reporteError = `### 🔴 Error Crítico de Sintaxis (Bloquea el Despliegue)
+**Problema:** Error en la **línea ${lineaError}**. Se encontró la etiqueta de cierre \`</${xmlCheck.nombreTag}>\` pero no coincide con la última etiqueta abierta.
+**Impacto:** Cruce de etiquetas inválido. Rompe el parser XML e impide la inicialización de la aplicación.
+**Solución:** Corrige el orden de cierre de las etiquetas en la **línea ${lineaError}** para asegurar el balance correcto.`;
+      } else {
+        const lineaStr = lineaError ? ` en la **línea ${lineaError}**` : "";
+        reporteError = `### 🔴 Error Crítico de Sintaxis (Bloquea el Despliegue)
+**Problema:** XML mal formado${lineaStr}.
+**Detalle:** ${xmlCheck.error || "Formato XML inválido"}
 **Impacto:** Fallo inmediato en la inicialización de IIS o el servidor web.
-**Solución:** Verifica que todas las etiquetas XML estén balanceadas y bien cerradas en tu archivo nuevo.`;
+**Solución:** Verifica que todas las etiquetas XML estén balanceadas y bien cerradas.`;
       }
 
       return NextResponse.json({

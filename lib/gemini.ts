@@ -9,16 +9,28 @@ import type { DiffLine, ValidationResult } from "@/types";
 
 const SYSTEM_PROMPT = `Eres un experto de nivel senior en revisión de código, archivos de configuración (XML, JSON, .env, .config, web.config, appsettings.json), Stored Procedures y scripts SQL.
 
-Tu tarea es comparar la versión "antigua" (en producción) de un archivo con la versión "nueva" (a desplegar) y detectar:
-1. Errores de sintaxis (tags XML sin cerrar, JSON mal formado, comas de más o faltantes, comillas no emparejadas, paréntesis sin cerrar en SQL, etc.)
-2. Cambios estructurales sospechosos o de alto riesgo (claves eliminadas accidentalmente, claves duplicadas, indentación rota)
-3. Omisiones o inconsistencias (variables de entorno referenciadas en el nuevo archivo que no están declaradas, o variables de producción eliminadas sin equivalentes)
-4. Problemas en consultas SQL embebidas o Stored Procedures (validar sintaxis SQL básica, que las tablas/campos referenciados tengan coherencia lógica, cadenas de conexión mal formadas o parámetros de configuración faltantes)
-5. Valores críticos sospechosos (parámetros vacíos, nulos o apuntando a entornos locales/desarrollo erróneos en el archivo de producción)
+Tu tarea es comparar la versión "antigua" (en producción) de un archivo con la versión "nueva" (a desplegar) y detectar problemas de forma analítica y objetiva.
 
-REGLA CRÍTICA DE VALIDACIÓN (DELTA):
+REGLAS ESTRICTAS DE CLASIFICACIÓN Y VALIDACIÓN:
+
+1. REGLA DELTA (CONCENTRARSE EN CAMBIOS):
 - Concéntrate EXCLUSIVAMENTE en los cambios nuevos introducidos en el archivo nuevo (la diferencia/delta).
-- Si una advertencia de seguridad, variable vacía (ej: llaves AWS vacías), configuración insegura o hostname ya existía de forma idéntica en el ARCHIVO ANTIGUO, NO lo reportes como advertencia ni error. El objetivo es validar la seguridad e integridad del pase actual, no auditar configuraciones legadas que ya están corriendo y aprobadas en producción.
+- Si una variable vacía, hostname o directiva dudosa ya existía de forma idéntica en el ARCHIVO ANTIGUO, NO lo reportes como advertencia ni error.
+
+2. PROHIBIDO DEDUCIR ELIMINACIONES FALSAS:
+- Al recibir un diff parcial, si una clave o línea del archivo antiguo no aparece mencionada en el diff nuevo, **NO significa que haya sido eliminada**. Significa que se mantuvo intacta y sin cambios. Solo reporta una clave como eliminada si en el diff aparece explícitamente marcada con el prefijo '[ELIMINADO]'.
+
+3. ERRORES CRÍTICOS (valido = false):
+- Solo cataloga como error crítico (que bloquea el pase y pone "valido": false) lo siguiente:
+  * Errores de sintaxis física que rompen el parser (tags XML sin cerrar, llaves JSON sin emparejar, comillas rotas, paréntesis cruzados en SQL).
+  * Uso de variables o columnas temporales en el diff que no existan ni estén declaradas en las declaraciones globales del archivo (inconsistencia lógica de compilación).
+  * Cambios obvios que causen fallos catastróficos inmediatos.
+
+4. ADVERTENCIAS (valido = true):
+- Clasifica como ADVERTENCIA (manteniendo "valido": true) lo siguiente:
+  * Adición de nuevas URLs, credenciales o balanceadores de carga de AWS/Cloudflare.
+  * Cambios de timeouts, políticas de reintento o configuraciones de pools.
+  * *Nota especial:* Agregar una URL interna de AWS (ej: balanceadores 'internal-prd...') o una clave nueva de timeout es un comportamiento normal de despliegue. Nunca la catalogues como error crítico; repórtala únicamente como una sugerencia/advertencia informativa menor.
 
 Si el archivo es un script SQL o un Stored Procedure (SP):
 - Debes realizar una validación de consistencia de variables y tablas temporales.
@@ -291,58 +303,107 @@ export async function validarConIA(
   contenidoNuevo: string,
   nombreArchivo: string
 ): Promise<ValidationResult> {
-  let responseText = "";
   const openrouterApiKey = process.env.OPENROUTER_API_KEY;
   const groqApiKey = process.env.GROQ_API_KEY;
-  let proveedor = "Google Gemini";
+  const geminiApiKey = process.env.GEMINI_API_KEY;
 
-  try {
-    if (openrouterApiKey) {
-      const model = process.env.OPENROUTER_MODEL || "openrouter/free";
-      proveedor = `OpenRouter (${model})`;
-      console.log(`[IA] Utilizando OpenRouter API: ${model}`);
-      responseText = await llamarAOpenRouter(openrouterApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo);
-    } else if (groqApiKey) {
-      const model = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
-      proveedor = `Groq (${model})`;
-      console.log(`[IA] Utilizando Groq API: ${model}`);
-      responseText = await llamarAGroq(groqApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo);
-    } else {
-      const model = process.env.GEMINI_MODEL || "gemini-1.5-flash";
-      proveedor = `Google Gemini (${model})`;
-      console.log(`[IA] Utilizando Google Gemini API: ${model}`);
-      responseText = await llamarAGemini(contenidoAntiguo, contenidoNuevo, nombreArchivo);
-    }
+  // Definimos la lista de intentos estructurada con sus prioridades y claves
+  interface IntentoIA {
+    nombre: string;
+    ejecutar: () => Promise<{ responseText: string; proveedor: string }>;
+  }
 
-    // Limpieza estándar del JSON por si la IA introduce formato markdown
-    const cleaned = responseText
-      .replace(/```json\n?/g, "")
-      .replace(/```\n?/g, "")
-      .trim();
+  const colaIntentos: IntentoIA[] = [];
 
-    const parsed = JSON.parse(cleaned) as ValidationResult;
+  if (geminiApiKey) {
+    colaIntentos.push({
+      nombre: "Google Gemini",
+      ejecutar: async () => {
+        const model = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+        const res = await llamarAGemini(contenidoAntiguo, contenidoNuevo, nombreArchivo);
+        return { responseText: res, proveedor: `Google Gemini (${model})` };
+      },
+    });
+  }
 
-    if (typeof parsed.valido !== "boolean") {
-      throw new Error("Respuesta de IA con estructura inválida");
-    }
+  if (groqApiKey) {
+    colaIntentos.push({
+      nombre: "Groq",
+      ejecutar: async () => {
+        const model = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
+        const res = await llamarAGroq(groqApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo);
+        return { responseText: res, proveedor: `Groq (${model})` };
+      },
+    });
+  }
 
-    return {
-      valido: parsed.valido,
-      errores: Array.isArray(parsed.errores) ? parsed.errores : [],
-      advertencias: Array.isArray(parsed.advertencias) ? parsed.advertencias : [],
-      resumen: parsed.resumen || "Sin resumen disponible",
-      proveedor,
-    };
-  } catch (err: any) {
-    console.error("[IA Error]", err);
+  if (openrouterApiKey) {
+    colaIntentos.push({
+      nombre: "OpenRouter",
+      ejecutar: async () => {
+        const model = process.env.OPENROUTER_MODEL || "openrouter/free";
+        const res = await llamarAOpenRouter(openrouterApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo);
+        return { responseText: res, proveedor: `OpenRouter (${model})` };
+      },
+    });
+  }
+
+  if (colaIntentos.length === 0) {
     return {
       valido: false,
       errores: [
-        `Error al conectar o procesar la respuesta de la IA: ${err?.message || "Error desconocido"}`,
+        "No se ha configurado ninguna clave de API en el archivo .env.local (OPENROUTER_API_KEY, GROQ_API_KEY o GEMINI_API_KEY).",
       ],
       advertencias: [],
-      resumen: "No se pudo completar la validación automática.",
-      proveedor,
+      resumen: "Validación detenida por falta de configuración de IA.",
+      proveedor: "Ninguno",
     };
   }
+
+  const erroresAcumulados: string[] = [];
+
+  // Ejecución secuencial (Fallback en cadena)
+  for (const intento of colaIntentos) {
+    try {
+      console.log(`[IA Orquestador] Intentando validación con proveedor: ${intento.nombre}...`);
+      const { responseText, proveedor } = await intento.ejecutar();
+
+      // Limpieza estándar del JSON por si la IA introduce formato markdown
+      const cleaned = responseText
+        .replace(/```json\n?/g, "")
+        .replace(/```\n?/g, "")
+        .trim();
+
+      const parsed = JSON.parse(cleaned) as ValidationResult;
+
+      if (typeof parsed.valido !== "boolean") {
+        throw new Error("Respuesta de IA con estructura de JSON inválida");
+      }
+
+      console.log(`[IA Orquestador] validación completada con éxito por: ${intento.nombre}`);
+      return {
+        valido: parsed.valido,
+        errores: Array.isArray(parsed.errores) ? parsed.errores : [],
+        advertencias: Array.isArray(parsed.advertencias) ? parsed.advertencias : [],
+        resumen: parsed.resumen || "Sin resumen disponible",
+        proveedor,
+      };
+    } catch (err: any) {
+      const msg = err?.message || "Error desconocido";
+      console.warn(`[IA Orquestador] Falló ${intento.nombre}: ${msg}. Intentando siguiente proveedor...`);
+      erroresAcumulados.push(`${intento.nombre}: ${msg}`);
+    }
+  }
+
+  // Si llegamos aquí es porque TODOS los proveedores de la cola fallaron
+  return {
+    valido: false,
+    errores: [
+      "Todos los proveedores de IA configurados fallaron o excedieron sus cuotas:",
+      ...erroresAcumulados.map((e) => `• ${e}`),
+    ],
+    advertencias: [],
+    resumen: "No se pudo completar la validación automática con ningún proveedor de IA.",
+    proveedor: "Todos los proveedores fallaron",
+  };
 }

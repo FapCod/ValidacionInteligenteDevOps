@@ -89,17 +89,35 @@ export function validarXml(xmlText: string): XmlValidationResult {
     // Si el contenido del tag contiene un "<" interno, significa que la etiqueta anterior
     // nunca se cerró con ">" y el parser saltó directamente al inicio de la siguiente.
     if (tagContent.includes("<")) {
+      // Buscar el inicio real de la etiqueta que no se cerró (el "<" anterior a nextOpen)
+      const startIdx = xmlText.lastIndexOf("<", nextOpen - 1);
+      if (startIdx !== -1) {
+        const lines = xmlText.substring(0, startIdx).split("\n");
+        const lineNum = lines.length;
+        
+        // Obtener el contenido completo de la línea donde comenzó el tag roto
+        const endLineIdx = xmlText.indexOf("\n", startIdx);
+        const badLineContent = xmlText.slice(
+          startIdx, 
+          endLineIdx === -1 ? xmlText.length : endLineIdx
+        ).trim();
+
+        return {
+          valido: false,
+          tipo: "sin_cerrar",
+          linea: lineNum,
+          tagMalo: badLineContent,
+          error: `Etiqueta mal formada o etiqueta sin cerrar con '/>' o '>'.`,
+        };
+      }
+
+      // Fallback si no encuentra el inicio
       const lineNum = xmlText.substring(0, nextOpen).split("\n").length;
-      
-      // Extraemos la línea física que causó el error para aislar el tag roto
-      const lines = xmlText.substring(0, nextOpen).split("\n");
-      const badLineContent = lines[lines.length - 1] || "";
-      
       return {
         valido: false,
         tipo: "sin_cerrar",
         linea: lineNum,
-        tagMalo: badLineContent.trim(),
+        tagMalo: tagContent.trim(),
         error: `Etiqueta mal formada o etiqueta sin cerrar con '/>' o '>'.`,
       };
     }
