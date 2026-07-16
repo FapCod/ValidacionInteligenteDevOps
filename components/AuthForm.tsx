@@ -45,6 +45,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
           password,
           options: {
             data: { nombre },
+            emailRedirectTo: `${window.location.origin}/login`,
           },
         });
         if (error) throw error;

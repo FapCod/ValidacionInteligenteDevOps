@@ -56,6 +56,7 @@ export interface ReporteConsumoUsuario {
   usuario_id: string;
   nombre: string;
   email: string;
+  puede_validar_ia: boolean;
   total_consultas: number;
   tokens_estimados: number;
 }

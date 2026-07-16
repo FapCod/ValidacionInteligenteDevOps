@@ -54,6 +54,26 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // 2.5 Verificar si el usuario tiene permitido validar con IA
+  const supabase = createSupabaseServerClient();
+  const { data: userData, error: userError } = await supabase
+    .from("usuarios")
+    .select("puede_validar_ia")
+    .eq("id", user.id)
+    .single();
+
+  if (userError || !userData) {
+    console.error("[/api/validar] Error al consultar puede_validar_ia:", userError?.message);
+    return NextResponse.json({ error: "Error al verificar permisos del usuario." }, { status: 500 });
+  }
+
+  if (!userData.puede_validar_ia) {
+    return NextResponse.json(
+      { error: "Tu usuario no tiene permitido validar con IA. Por favor, contacta a un administrador." },
+      { status: 403 }
+    );
+  }
+
   // 3. Parsear y validar el body
   let body: ValidarRequestBody;
   try {
@@ -188,8 +208,7 @@ ${tagSugerido}
     );
   }
 
-  // 7. Guardar en Supabase usando service_role (bypasea RLS para inserción server-side)
-  const supabase = createSupabaseServerClient();
+  // 7. Guardar en Supabase (bypasea RLS para inserción server-side)
   const { error: dbError } = await supabase.from("validaciones").insert({
     usuario_id: user.id, // Siempre del JWT verificado
     nombre_archivo: nombreSanitizado,

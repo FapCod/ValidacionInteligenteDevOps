@@ -109,6 +109,45 @@ export default function AdminPage() {
     }
   };
 
+  const handleToggleAccesoIA = async (usuarioId: string, currentStatus: boolean) => {
+    try {
+      const { data: { session } } = await supabaseBrowser.auth.getSession();
+      if (!session) {
+        alert("Sesión expirada. Vuelve a iniciar sesión.");
+        return;
+      }
+
+      const response = await fetch("/api/admin/usuarios", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          usuario_id: usuarioId,
+          puede_validar_ia: !currentStatus,
+        }),
+      });
+
+      const resData = await response.json();
+      if (!response.ok) {
+        alert(resData.error || "Error al actualizar los permisos");
+        return;
+      }
+
+      // Actualizar el estado local para reflejar el cambio de inmediato en la tabla
+      setReporte((prevReporte) =>
+        prevReporte.map((usr) =>
+          usr.usuario_id === usuarioId
+            ? { ...usr, puede_validar_ia: !currentStatus }
+            : usr
+        )
+      );
+    } catch (err: any) {
+      alert("Error al conectar con el servidor: " + (err.message || err));
+    }
+  };
+
   // Efecto para cargar el prompt cuando se selecciona la pestaña
   useEffect(() => {
     if (activeTab === "prompt" && !promptValue) {
@@ -348,8 +387,9 @@ export default function AdminPage() {
                       <tr>
                         <th>Nombre</th>
                         <th>Email</th>
-                        <th style={{ textAlign: "center" }}>Consultas</th>
-                        <th style={{ textAlign: "right" }}>Tokens Est.</th>
+                        <th style={{ textAlign: "center", width: "120px" }}>Acceso IA</th>
+                        <th style={{ textAlign: "center", width: "100px" }}>Consultas</th>
+                        <th style={{ textAlign: "right", width: "130px" }}>Tokens Est.</th>
                         <th style={{ width: "120px", textAlign: "center" }}>Acciones</th>
                       </tr>
                     </thead>
@@ -366,6 +406,54 @@ export default function AdminPage() {
                           </td>
                           <td>
                             <span style={{ color: "var(--color-text-muted)", fontSize: "0.85rem" }}>{usr.email}</span>
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            <button
+                              onClick={() => handleToggleAccesoIA(usr.usuario_id, usr.puede_validar_ia)}
+                              type="button"
+                              title={usr.puede_validar_ia ? "Haga clic para desactivar el acceso de IA" : "Haga clic para activar el acceso de IA"}
+                              style={{
+                                background: usr.puede_validar_ia ? "rgba(16, 185, 129, 0.15)" : "rgba(239, 68, 68, 0.15)",
+                                color: usr.puede_validar_ia ? "#34d399" : "#f87171",
+                                border: usr.puede_validar_ia ? "1px solid rgba(16, 185, 129, 0.3)" : "1px solid rgba(239, 68, 68, 0.3)",
+                                padding: "4px 10px",
+                                borderRadius: "12px",
+                                fontSize: "0.72rem",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                transition: "all 0.25s ease",
+                                minWidth: "85px",
+                                display: "inline-block",
+                              }}
+                              onMouseOver={(e) => {
+                                if (usr.puede_validar_ia) {
+                                  e.currentTarget.style.background = "rgba(239, 68, 68, 0.2)";
+                                  e.currentTarget.style.color = "#f87171";
+                                  e.currentTarget.style.borderColor = "rgba(239, 68, 68, 0.4)";
+                                  e.currentTarget.innerText = "Bloquear";
+                                } else {
+                                  e.currentTarget.style.background = "rgba(16, 185, 129, 0.2)";
+                                  e.currentTarget.style.color = "#34d399";
+                                  e.currentTarget.style.borderColor = "rgba(16, 185, 129, 0.4)";
+                                  e.currentTarget.innerText = "Permitir";
+                                }
+                              }}
+                              onMouseOut={(e) => {
+                                if (usr.puede_validar_ia) {
+                                  e.currentTarget.style.background = "rgba(16, 185, 129, 0.15)";
+                                  e.currentTarget.style.color = "#34d399";
+                                  e.currentTarget.style.borderColor = "rgba(16, 185, 129, 0.3)";
+                                  e.currentTarget.innerText = "Permitido";
+                                } else {
+                                  e.currentTarget.style.background = "rgba(239, 68, 68, 0.15)";
+                                  e.currentTarget.style.color = "#f87171";
+                                  e.currentTarget.style.borderColor = "rgba(239, 68, 68, 0.3)";
+                                  e.currentTarget.innerText = "Bloqueado";
+                                }
+                              }}
+                            >
+                              {usr.puede_validar_ia ? "Permitido" : "Bloqueado"}
+                            </button>
                           </td>
                           <td style={{ textAlign: "center", fontWeight: 600 }}>{usr.total_consultas}</td>
                           <td style={{ textAlign: "right", color: "#10b981", fontFamily: "var(--font-mono)", fontSize: "0.85rem" }}>
