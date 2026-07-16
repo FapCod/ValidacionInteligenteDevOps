@@ -7,45 +7,65 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { computeDiffWithContext } from "./diff";
 import type { DiffLine, ValidationResult } from "@/types";
 
-const SYSTEM_PROMPT = `Eres un experto de nivel senior en revisión de código, archivos de configuración (XML, JSON, .env, .config, web.config, appsettings.json), Stored Procedures y scripts SQL.
+const SYSTEM_PROMPT = `Eres un experto senior en revisión de código, archivos de configuración y bases de datos SQL Server. Tu tarea es analizar un archivo o script ANTIGUO (versión actual en producción) contra uno NUEVO (versión que se va a desplegar), y detectar errores humanos comunes antes de que lleguen a producción.
 
-Tu tarea es comparar la versión "antigua" (en producción) de un archivo con la versión "nueva" (a desplegar) y detectar problemas de forma analítica y objetiva.
+Debes revisar los siguientes tipos de problemas, según el tipo de archivo detectado:
 
-REGLAS ESTRICTAS DE CLASIFICACIÓN Y VALIDACIÓN:
+## 1. ARCHIVOS DE CONFIGURACIÓN (web.config, app.config, appsettings.json, .env)
 
-1. REGLA DELTA (CONCENTRARSE EN CAMBIOS):
-- Concéntrate EXCLUSIVAMENTE en los cambios nuevos introducidos en el archivo nuevo (la diferencia/delta).
-- Si una variable vacía, hostname o directiva dudosa ya existía de forma idéntica en el ARCHIVO ANTIGUO, NO lo reportes como advertencia ni error.
+- Detecta tags XML sin cerrar correctamente (falta '/>', falta tag de cierre, comillas sin cerrar)
+- Detecta JSON mal formado (comas faltantes o de más, llaves/corchetes sin cerrar, comillas faltantes)
+- Detecta keys duplicadas o eliminadas sin intención al comparar antiguo vs nuevo
+- Detecta URLs, cadenas de conexión o endpoints que correspondan a ambientes NO productivos (dev, qa, test, ts, ppr, staging, sandbox, local, localhost) cuando el contexto indica que el archivo es para PRODUCCIÓN. Si detectas términos como "qa", "test", "ts-", "ppr", "dev", "staging" en una URL dentro de un archivo que va a producción, esto es un ERROR CRÍTICO y debes advertirlo explícitamente.
+- Detecta cambios de tipo de dato o formato inesperados en un value (ej: un puerto que cambió de número a texto)
 
-2. PROHIBIDO DEDUCIR ELIMINACIONES FALSAS:
-- Al recibir un diff parcial, si una clave o línea del archivo antiguo no aparece mencionada en el diff nuevo, **NO significa que haya sido eliminada**. Significa que se mantuvo intacta y sin cambios. Solo reporta una clave como eliminada si en el diff aparece explícitamente marcada con el prefijo '[ELIMINADO]'.
+## 2. SCRIPTS SQL / STORED PROCEDURES
 
-3. ERRORES CRÍTICOS (valido = false):
-- Solo cataloga como error crítico (que bloquea el pase y pone "valido": false) lo siguiente:
-  * Errores de sintaxis física que rompen el parser (tags XML sin cerrar, llaves JSON sin emparejar, comillas rotas, paréntesis cruzados en SQL).
-  * Uso de variables o columnas temporales en el diff que no existan ni estén declaradas en las declaraciones globales del archivo (inconsistencia lógica de compilación).
-  * Cambios obvios que causen fallos catastróficos inmediatos.
+- **Consistencia de atributos en tablas temporales**: Si el script crea o modifica una tabla temporal (#Tabla o ##Tabla) agregando una nueva columna, verifica que TODAS las referencias posteriores a esa tabla temporal (INSERT, SELECT, JOIN, UPDATE) sean consistentes con la nueva estructura. Si se agrega una columna en una definición de tabla temporal pero luego se usa en un INSERT o SELECT sin que exista en todas las instancias/creaciones de esa tabla temporal a lo largo del script, repórtalo como ERROR.
+- Si detectas que se usa una columna en un JOIN, WHERE o SELECT que no fue declarada en el CREATE TABLE de la tabla temporal correspondiente, repórtalo como error de referencia a columna inexistente.
+- Detecta sentencias 'CREATE OR ALTER' y advierte que esta sintaxis solo es compatible con SQL Server 2016 SP1 en adelante. Si el contexto o la configuración indica que el servidor de destino es una versión anterior (ej. SQL Server 2012, 2014, o 2016 sin SP1), márcalo como ERROR CRÍTICO de compatibilidad.
+- Detecta el uso de funciones o sintaxis específicas de versiones nuevas (ej: STRING_AGG requiere 2017+, funciones JSON requieren 2016+, DROP TABLE IF EXISTS requiere 2016+) y valida contra la versión de destino indicada.
+- Detecta DROP de columnas, tablas o procedimientos que puedan romper referencias existentes en el mismo script o en la comparación con la versión antigua.
+- Detecta transacciones sin manejo de errores (BEGIN TRAN sin TRY/CATCH o sin COMMIT/ROLLBACK correspondiente).
+- Detecta cambios de tipo de dato en columnas ya existentes que puedan causar truncamiento o pérdida de datos (ej: de NVARCHAR(200) a NVARCHAR(50)).
 
-4. ADVERTENCIAS (valido = true):
-- Clasifica como ADVERTENCIA (manteniendo "valido": true) lo siguiente:
-  * Adición de nuevas URLs, credenciales o balanceadores de carga de AWS/Cloudflare.
-  * Cambios de timeouts, políticas de reintento o configuraciones de pools.
-  * *Nota especial:* Agregar una URL interna de AWS (ej: balanceadores 'internal-prd...') o una clave nueva de timeout es un comportamiento normal de despliegue. Nunca la catalogues como error crítico; repórtala únicamente como una sugerencia/advertencia informativa menor.
+## 3. VALIDACIONES GENERALES (cualquier tipo de archivo)
 
-Si el archivo es un script SQL o un Stored Procedure (SP):
-- Debes realizar una validación de consistencia de variables y tablas temporales.
-- Si en el código modificado/agregado se hace referencia a una variable (ej: @miVariable) o a una columna de una tabla temporal (ej: #MiTabla.NombreColumna o INSERT INTO #MiTabla (Columna)), debes verificar que dicha variable o columna realmente estén declaradas en las "Declaraciones Globales de Contexto" proporcionadas.
-- Si una variable o columna es utilizada pero no aparece declarada en las definiciones del archivo, considéralo un error crítico ("valido": false) especificando qué variable o columna de tabla temporal no ha sido declarada.
+- Compara estructura antigua vs nueva y señala cualquier eliminación, duplicación o modificación que parezca no intencional
+- Si el nombre del archivo, comentarios, o contexto indican el ambiente de destino, siempre valida que las referencias internas (URLs, connection strings, nombres de servidor) sean coherentes con ese ambiente
 
-Responde ÚNICAMENTE en formato JSON plano con la siguiente estructura exacta. No agregues explicaciones adicionales fuera del JSON, no uses bloques de código con markdown ni backticks:
+## CONTEXTO QUE RECIBIRÁS
+
+Además del archivo antiguo y nuevo, puede que recibas:
+- Ambiente de destino (ej: PRD, QA, TS, PPR)
+- Versión del motor de base de datos de destino (ej: SQL Server 2016, 2019)
+- Tipo de archivo (config, SQL, JSON, etc.)
+
+Usa ese contexto para hacer las validaciones más precisas. Si no te lo proporcionan, infiere el ambiente y la versión a partir de pistas dentro del propio archivo (comentarios, nombres de servidor, etc.), y si no puedes inferirlo, indícalo como advertencia ("no se pudo determinar el ambiente/versión de destino, verificar manualmente").
+
+## FORMATO DE RESPUESTA
+
+Responde ÚNICAMENTE en este formato JSON, sin texto adicional antes o después:
+
 {
-  "valido": true,
-  "errores": ["Descripción detallada del error crítico 1", "Descripción detallada del error crítico 2"],
-  "advertencias": ["Advertencia menor o sugerencia 1"],
-  "resumen": "Resumen profesional de los cambios y hallazgos en 1 o 2 líneas"
+  "valido": true/false,
+  "errores_criticos": [
+    {
+      "tipo": "sintaxis | referencia_inexistente | compatibilidad_version | ambiente_incorrecto | seguridad | otro",
+      "descripcion": "descripción clara y específica del error, incluyendo línea o fragmento afectado",
+      "linea_aproximada": "número o referencia si aplica"
+    }
+  ],
+  "advertencias": [
+    {
+      "tipo": "sintaxis | referencia_inexistente | compatibilidad_version | ambiente_incorrecto | seguridad | otro",
+      "descripcion": "descripción de la advertencia, no bloqueante pero recomendable revisar"
+    }
+  ],
+  "resumen": "resumen ejecutivo de 2-3 líneas sobre el estado general del archivo"
 }
 
-Si encuentras algún error de sintaxis o inconsistencia crítica que pueda romper el despliegue o la base de datos, el campo "valido" debe ser obligatoriamente false. Si solo hay cambios normales y observaciones menores, "valido" puede ser true.`;
+Sé estricto pero preciso: no reportes falsos positivos, pero no omitas ningún error que pueda causar una falla en producción. Prioriza siempre los errores que rompan sintaxis o generen incompatibilidad de versión, ya que estos son los más costosos de detectar tarde.`;
 
 // ─── Extractor de Contexto Declarativo de SQL ─────────────────────────────────
 /**
@@ -414,17 +434,41 @@ export async function validarConIA(
         .replace(/```\n?/g, "")
         .trim();
 
-      const parsed = JSON.parse(cleaned) as ValidationResult;
+      const parsed = JSON.parse(cleaned);
 
       if (typeof parsed.valido !== "boolean") {
         throw new Error("Respuesta de IA con estructura de JSON inválida");
       }
 
+      // Convertir el formato extendido de errores y advertencias al formato clásico
+      let errores: string[] = [];
+      if (Array.isArray(parsed.errores_criticos)) {
+        errores = parsed.errores_criticos.map((e: any) => {
+          const lineInfo = e.linea_aproximada ? ` (Línea aprox: ${e.linea_aproximada})` : "";
+          const tipo = e.tipo ? `[${e.tipo.toUpperCase()}] ` : "";
+          return `${tipo}${e.descripcion}${lineInfo}`;
+        });
+      } else if (Array.isArray(parsed.errores)) {
+        errores = parsed.errores.map((e: any) => typeof e === "object" ? `${e.descripcion || JSON.stringify(e)}` : String(e));
+      }
+
+      let advertencias: string[] = [];
+      if (Array.isArray(parsed.advertencias)) {
+        advertencias = parsed.advertencias.map((w: any) => {
+          if (typeof w === "object") {
+            const tipo = w.tipo ? `[${w.tipo.toUpperCase()}] ` : "";
+            const lineInfo = w.linea_aproximada ? ` (Línea aprox: ${w.linea_aproximada})` : "";
+            return `${tipo}${w.descripcion}${lineInfo}`;
+          }
+          return String(w);
+        });
+      }
+
       console.log(`[IA Orquestador] validación completada con éxito por: ${intento.nombre}`);
       return {
         valido: parsed.valido,
-        errores: Array.isArray(parsed.errores) ? parsed.errores : [],
-        advertencias: Array.isArray(parsed.advertencias) ? parsed.advertencias : [],
+        errores,
+        advertencias,
         resumen: parsed.resumen || "Sin resumen disponible",
         proveedor,
       };

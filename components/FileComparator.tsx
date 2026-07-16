@@ -8,6 +8,7 @@ import { computeSideBySideDiff } from "@/lib/diff";
 import { detectFileType, type DetectedType } from "@/lib/detectFileType";
 import ValidationResultPanel from "@/components/ValidationResult";
 import type { SideBySideRow, ValidationResult } from "@/types";
+import { diffChars } from "diff";
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10MB
 
@@ -37,6 +38,55 @@ function highlightWhitespaces(text: string) {
   }
 
   return text;
+}
+
+// Helper para visualizar y resaltar cambios de caracteres específicos en una línea modificada
+function renderInlineDiff(oldText: string, newText: string, isRightSide: boolean) {
+  const diffs = diffChars(oldText, newText);
+
+  return (
+    <>
+      {diffs.map((part, index) => {
+        if (isRightSide) {
+          // Lado derecho (Nuevos cambios - added)
+          if (part.added) {
+            const isWhitespace = /^\s+$/.test(part.value);
+            return (
+              <span 
+                key={index} 
+                className="inline-added"
+                title={isWhitespace ? `${part.value.length} espacio(s) agregado(s)` : undefined}
+              >
+                {isWhitespace ? "·".repeat(part.value.length) : part.value}
+              </span>
+            );
+          }
+          if (part.removed) {
+            return null; // Omitir eliminados
+          }
+          return part.value; // Texto sin cambios
+        } else {
+          // Lado izquierdo (Antiguos cambios - removed)
+          if (part.removed) {
+            const isWhitespace = /^\s+$/.test(part.value);
+            return (
+              <span 
+                key={index} 
+                className="inline-removed"
+                title={isWhitespace ? `${part.value.length} espacio(s) eliminado(s)` : undefined}
+              >
+                {isWhitespace ? "·".repeat(part.value.length) : part.value}
+              </span>
+            );
+          }
+          if (part.added) {
+            return null; // Omitir agregados
+          }
+          return part.value; // Texto sin cambios
+        }
+      })}
+    </>
+  );
 }
 
 // ─── Diff Side-by-Side Viewer ─────────────────────────────────────────────────
@@ -88,24 +138,36 @@ function DiffViewer({ rows }: { rows: SideBySideRow[] }) {
             <div className="diff-col-header new">🟢 Versión Nueva (A desplegar)</div>
           </div>
           <div className="diff-sbs-scroll" aria-label="Diff side-by-side">
-            {rows.map((row, i) => (
-              <div key={i} className="diff-sbs-row">
-                <div className={`diff-sbs-cell ${row.left.type}`}>
-                  <div className="sbs-num">{row.left.lineNum ?? ""}</div>
-                  <div className="sbs-sign">
-                    {row.left.type === "empty" ? "" : signFor(row.left.type)}
+            {rows.map((row, i) => {
+              const isPaired = row.left.type === "removed" && row.right.type === "added";
+
+              return (
+                <div key={i} className="diff-sbs-row">
+                  <div className={`diff-sbs-cell ${row.left.type}`}>
+                    <div className="sbs-num">{row.left.lineNum ?? ""}</div>
+                    <div className="sbs-sign">
+                      {row.left.type === "empty" ? "" : signFor(row.left.type)}
+                    </div>
+                    <div className="sbs-content">
+                      {isPaired 
+                        ? renderInlineDiff(row.left.content, row.right.content, false)
+                        : highlightWhitespaces(row.left.content)}
+                    </div>
                   </div>
-                  <div className="sbs-content">{highlightWhitespaces(row.left.content)}</div>
-                </div>
-                <div className={`diff-sbs-cell ${row.right.type}`}>
-                  <div className="sbs-num">{row.right.lineNum ?? ""}</div>
-                  <div className="sbs-sign">
-                    {row.right.type === "empty" ? "" : signFor(row.right.type)}
+                  <div className={`diff-sbs-cell ${row.right.type}`}>
+                    <div className="sbs-num">{row.right.lineNum ?? ""}</div>
+                    <div className="sbs-sign">
+                      {row.right.type === "empty" ? "" : signFor(row.right.type)}
+                    </div>
+                    <div className="sbs-content">
+                      {isPaired 
+                        ? renderInlineDiff(row.left.content, row.right.content, true)
+                        : highlightWhitespaces(row.right.content)}
+                    </div>
                   </div>
-                  <div className="sbs-content">{highlightWhitespaces(row.right.content)}</div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}

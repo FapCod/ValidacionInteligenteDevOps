@@ -1054,3 +1054,20 @@ a:hover { text-decoration: underline; }
   border-radius: var(--radius-sm);
   padding: 0 2px;
 }
+
+/* ─── Intraline (Character-level) Highlights ────────────────────────── */
+.diff-sbs-cell.removed .inline-removed {
+  background: rgba(239, 68, 68, 0.45) !important;
+  color: #ffffff !important;
+  border-radius: 2px;
+  padding: 1px 2px;
+  font-weight: 600;
+}
+
+.diff-sbs-cell.added .inline-added {
+  background: rgba(16, 185, 129, 0.45) !important;
+  color: #ffffff !important;
+  border-radius: 2px;
+  padding: 1px 2px;
+  font-weight: 600;
+}
