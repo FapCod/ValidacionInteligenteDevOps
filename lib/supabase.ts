@@ -46,5 +46,9 @@ export function createSupabaseServerClient(): SupabaseClient {
       autoRefreshToken: false,
       persistSession: false,
     },
+    global: {
+      // Forzar a Next.js a no cachear las consultas HTTP hechas a Supabase (ej: select del prompt)
+      fetch: (url, init) => fetch(url, { ...init, cache: "no-store" }),
+    },
   });
 }

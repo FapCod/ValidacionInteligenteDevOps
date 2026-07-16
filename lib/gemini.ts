@@ -6,8 +6,9 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { computeDiffWithContext } from "./diff";
 import type { DiffLine, ValidationResult } from "@/types";
+import { createSupabaseServerClient } from "./supabase";
 
-const SYSTEM_PROMPT = `Eres un experto senior en revisión de código, archivos de configuración y bases de datos SQL Server. Tu tarea es analizar un archivo o script ANTIGUO (versión actual en producción) contra uno NUEVO (versión que se va a desplegar), y detectar errores humanos comunes antes de que lleguen a producción.
+export const SYSTEM_PROMPT = `Eres un experto senior en revisión de código, archivos de configuración y bases de datos SQL Server. Tu tarea es analizar un archivo o script ANTIGUO (versión actual en producción) contra uno NUEVO (versión que se va a desplegar), y detectar errores humanos comunes antes de que lleguen a producción.
 
 Debes revisar los siguientes tipos de problemas, según el tipo de archivo detectado:
 
@@ -182,7 +183,8 @@ async function llamarAOpenRouter(
   apiKey: string,
   contenidoAntiguo: string,
   contenidoNuevo: string,
-  nombreArchivo: string
+  nombreArchivo: string,
+  systemPrompt: string
 ): Promise<string> {
   const modelName = process.env.OPENROUTER_MODEL || "openrouter/free";
   const userPrompt = construirUserPrompt(contenidoAntiguo, contenidoNuevo, nombreArchivo);
@@ -199,7 +201,7 @@ async function llamarAOpenRouter(
       body: JSON.stringify({
         model: selectedModel,
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
         temperature: 0.1,
@@ -238,7 +240,8 @@ async function llamarAGroq(
   apiKey: string,
   contenidoAntiguo: string,
   contenidoNuevo: string,
-  nombreArchivo: string
+  nombreArchivo: string,
+  systemPrompt: string
 ): Promise<string> {
   const modelName = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
   const userPrompt = construirUserPrompt(contenidoAntiguo, contenidoNuevo, nombreArchivo);
@@ -252,7 +255,7 @@ async function llamarAGroq(
     body: JSON.stringify({
       model: modelName,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
       temperature: 0.1,
@@ -283,7 +286,8 @@ function getGeminiClient() {
 async function llamarAGemini(
   contenidoAntiguo: string,
   contenidoNuevo: string,
-  nombreArchivo: string
+  nombreArchivo: string,
+  systemPrompt: string
 ): Promise<string> {
   const genAI = getGeminiClient();
   // Preferir gemini-2.5-flash como modelo base moderno
@@ -302,7 +306,7 @@ async function llamarAGemini(
     );
 
     const result = await model.generateContent([
-      { text: SYSTEM_PROMPT },
+      { text: systemPrompt },
       { text: userPrompt },
     ]);
 
@@ -367,6 +371,23 @@ export async function validarConIA(
   const groqApiKey = process.env.GROQ_API_KEY;
   const geminiApiKey = process.env.GEMINI_API_KEY;
 
+  // 1. Intentar obtener el prompt del sistema de la base de datos (con fallback al estático)
+  let activeSystemPrompt = SYSTEM_PROMPT;
+  try {
+    const supabase = createSupabaseServerClient();
+    const { data } = await supabase
+      .from("configuraciones")
+      .select("valor")
+      .eq("clave", "system_prompt")
+      .single();
+
+    if (data?.valor) {
+      activeSystemPrompt = data.valor;
+    }
+  } catch (dbErr) {
+    console.warn("[IA Orquestador] No se pudo leer configuraciones de la BD, usando prompt estático por defecto:", dbErr);
+  }
+
   // Definimos la lista de intentos estructurada con sus prioridades y claves
   interface IntentoIA {
     nombre: string;
@@ -380,7 +401,7 @@ export async function validarConIA(
       nombre: "Google Gemini",
       ejecutar: async () => {
         const model = process.env.GEMINI_MODEL || "gemini-1.5-flash";
-        const res = await llamarAGemini(contenidoAntiguo, contenidoNuevo, nombreArchivo);
+        const res = await llamarAGemini(contenidoAntiguo, contenidoNuevo, nombreArchivo, activeSystemPrompt);
         return { responseText: res, proveedor: `Google Gemini (${model})` };
       },
     });
@@ -391,7 +412,7 @@ export async function validarConIA(
       nombre: "Groq",
       ejecutar: async () => {
         const model = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
-        const res = await llamarAGroq(groqApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo);
+        const res = await llamarAGroq(groqApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo, activeSystemPrompt);
         return { responseText: res, proveedor: `Groq (${model})` };
       },
     });
@@ -402,7 +423,7 @@ export async function validarConIA(
       nombre: "OpenRouter",
       ejecutar: async () => {
         const model = process.env.OPENROUTER_MODEL || "openrouter/free";
-        const res = await llamarAOpenRouter(openrouterApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo);
+        const res = await llamarAOpenRouter(openrouterApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo, activeSystemPrompt);
         return { responseText: res, proveedor: `OpenRouter (${model})` };
       },
     });
