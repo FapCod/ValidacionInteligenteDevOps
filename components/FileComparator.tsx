@@ -91,6 +91,8 @@ function renderInlineDiff(oldText: string, newText: string, isRightSide: boolean
 
 // ─── Diff Side-by-Side Viewer ─────────────────────────────────────────────────
 function DiffViewer({ rows }: { rows: SideBySideRow[] }) {
+  const [soloCambios, setSoloCambios] = useState(false);
+
   const addedCount   = rows.filter((r) => r.right.type === "added").length;
   const removedCount = rows.filter((r) => r.left.type  === "removed").length;
 
@@ -99,13 +101,116 @@ function DiffViewer({ rows }: { rows: SideBySideRow[] }) {
 
   const isIdentical = addedCount === 0 && removedCount === 0;
 
+  // Encontrar índices de las filas que contienen cambios reales
+  const changedIndices = rows
+    .map((row, index) => ({ row, index }))
+    .filter(item => item.row.left.type !== "equal" || item.row.right.type !== "equal")
+    .map(item => item.index);
+
+  // Calcular filas visibles aplicando el filtro de colapso de líneas idénticas
+  const getVisibleRows = () => {
+    if (!soloCambios) {
+      return rows.map((row, index) => ({ type: "row" as const, row, index }));
+    }
+
+    const items: ({ type: "row"; row: SideBySideRow; index: number } | { type: "separator"; count: number })[] = [];
+    let hiddenCount = 0;
+
+    for (let i = 0; i < rows.length; i++) {
+      // Determinar si la fila actual o alguna cercana (dentro de un radio de 3 filas) tiene cambios
+      let nearChange = false;
+      for (let j = Math.max(0, i - 3); j <= Math.min(rows.length - 1, i + 3); j++) {
+        if (rows[j].left.type !== "equal" || rows[j].right.type !== "equal") {
+          nearChange = true;
+          break;
+        }
+      }
+
+      if (nearChange) {
+        if (hiddenCount > 0) {
+          items.push({ type: "separator", count: hiddenCount });
+          hiddenCount = 0;
+        }
+        items.push({ type: "row", row: rows[i], index: i });
+      } else {
+        hiddenCount++;
+      }
+    }
+
+    if (hiddenCount > 0) {
+      items.push({ type: "separator", count: hiddenCount });
+    }
+
+    return items;
+  };
+
+  const visibleItems = getVisibleRows();
+
   return (
     <div className="diff-viewer">
-      <div className="diff-header">
+      <div className="diff-header" style={{ flexWrap: "wrap", gap: "14px" }}>
         <span className="diff-title">📊 Diff Side-by-Side</span>
-        <div className="diff-stats">
-          <span className="added">+{addedCount} líneas agregadas</span>
-          <span className="removed">−{removedCount} líneas eliminadas</span>
+        
+        <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+          {/* Checkbox para ocultar líneas idénticas */}
+          {!isIdentical && (
+            <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "0.8rem", cursor: "pointer", userSelect: "none", color: "var(--color-text)" }}>
+              <input 
+                type="checkbox" 
+                checked={soloCambios} 
+                onChange={(e) => setSoloCambios(e.target.checked)}
+                style={{ cursor: "pointer" }}
+              />
+              <span>🔍 Solo mostrar cambios</span>
+            </label>
+          )}
+
+          {/* Buscador/Atajos rápidos a líneas con cambios */}
+          {changedIndices.length > 0 && (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
+              <span>📍 Líneas:</span>
+              <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+                {changedIndices.slice(0, 10).map((idx) => {
+                  const leftLine = rows[idx].left.lineNum;
+                  const rightLine = rows[idx].right.lineNum;
+                  const label = leftLine || rightLine || `${idx + 1}`;
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        const el = document.getElementById(`diff-row-${idx}`);
+                        if (el) {
+                          el.scrollIntoView({ behavior: "smooth", block: "center" });
+                          // Destello temporal para enfocar la vista del usuario
+                          el.style.outline = "2px solid var(--color-primary)";
+                          setTimeout(() => { el.style.outline = "none"; }, 1500);
+                        }
+                      }}
+                      style={{
+                        background: "var(--color-bg-secondary)",
+                        border: "1px solid var(--color-border-light)",
+                        borderRadius: "4px",
+                        padding: "2px 6px",
+                        color: "var(--color-primary)",
+                        fontWeight: 600,
+                        fontSize: "0.72rem",
+                        cursor: "pointer",
+                      }}
+                      type="button"
+                    >
+                      #{label}
+                    </button>
+                  );
+                })}
+                {changedIndices.length > 10 && <span style={{ fontSize: "0.75rem" }}>...</span>}
+              </div>
+            </div>
+          )}
+
+          <div className="diff-stats">
+            <span className="added">+{addedCount} líneas agregadas</span>
+            <span className="removed">−{removedCount} líneas eliminadas</span>
+          </div>
         </div>
       </div>
 
@@ -137,37 +242,105 @@ function DiffViewer({ rows }: { rows: SideBySideRow[] }) {
             <div className="diff-col-header old">🔴 Versión Anterior (Producción)</div>
             <div className="diff-col-header new">🟢 Versión Nueva (A desplegar)</div>
           </div>
-          <div className="diff-sbs-scroll" aria-label="Diff side-by-side">
-            {rows.map((row, i) => {
-              const isPaired = row.left.type === "removed" && row.right.type === "added";
+          <div style={{ position: "relative" }}>
+            <div className="diff-sbs-scroll" aria-label="Diff side-by-side">
+              {visibleItems.map((item, i) => {
+                if (item.type === "separator") {
+                  return (
+                    <div 
+                      key={`sep-${i}`} 
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "8px 0",
+                        background: "var(--color-bg-secondary)",
+                        color: "var(--color-text-subtle)",
+                        fontSize: "0.75rem",
+                        fontWeight: 600,
+                        fontFamily: "var(--font-sans)",
+                        borderTop: "1px dashed var(--color-border-light)",
+                        borderBottom: "1px dashed var(--color-border-light)",
+                        userSelect: "none",
+                        gap: "6px"
+                      }}
+                    >
+                      <span>↕️</span>
+                      <span>{item.count} líneas idénticas ocultas</span>
+                    </div>
+                  );
+                }
 
-              return (
-                <div key={i} className="diff-sbs-row">
-                  <div className={`diff-sbs-cell ${row.left.type}`}>
-                    <div className="sbs-num">{row.left.lineNum ?? ""}</div>
-                    <div className="sbs-sign">
-                      {row.left.type === "empty" ? "" : signFor(row.left.type)}
+                const { row, index } = item;
+                const isPaired = row.left.type === "removed" && row.right.type === "added";
+
+                return (
+                  <div key={index} id={`diff-row-${index}`} className="diff-sbs-row" style={{ transition: "outline 0.3s ease" }}>
+                    <div className={`diff-sbs-cell ${row.left.type}`}>
+                      <div className="sbs-num">{row.left.lineNum ?? ""}</div>
+                      <div className="sbs-sign">
+                        {row.left.type === "empty" ? "" : signFor(row.left.type)}
+                      </div>
+                      <div className="sbs-content">
+                        {isPaired 
+                          ? renderInlineDiff(row.left.content, row.right.content, false)
+                          : highlightWhitespaces(row.left.content)}
+                      </div>
                     </div>
-                    <div className="sbs-content">
-                      {isPaired 
-                        ? renderInlineDiff(row.left.content, row.right.content, false)
-                        : highlightWhitespaces(row.left.content)}
+                    <div className={`diff-sbs-cell ${row.right.type}`}>
+                      <div className="sbs-num">{row.right.lineNum ?? ""}</div>
+                      <div className="sbs-sign">
+                        {row.right.type === "empty" ? "" : signFor(row.right.type)}
+                      </div>
+                      <div className="sbs-content">
+                        {isPaired 
+                          ? renderInlineDiff(row.left.content, row.right.content, true)
+                          : highlightWhitespaces(row.right.content)}
+                      </div>
                     </div>
                   </div>
-                  <div className={`diff-sbs-cell ${row.right.type}`}>
-                    <div className="sbs-num">{row.right.lineNum ?? ""}</div>
-                    <div className="sbs-sign">
-                      {row.right.type === "empty" ? "" : signFor(row.right.type)}
-                    </div>
-                    <div className="sbs-content">
-                      {isPaired 
-                        ? renderInlineDiff(row.left.content, row.right.content, true)
-                        : highlightWhitespaces(row.right.content)}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+
+            {/* Marcadores de la barra de scroll (Minimap Scrollbar Markers) */}
+            {changedIndices.length > 0 && (
+              <div 
+                style={{
+                  position: "absolute",
+                  right: "6px", /* justo al lado izquierdo del riel de scroll nativo */
+                  top: "4px",
+                  bottom: "4px",
+                  width: "5px",
+                  pointerEvents: "none",
+                  zIndex: 20
+                }}
+              >
+                {visibleItems
+                  .map((item, idx) => ({ item, idx }))
+                  .filter(x => x.item.type === "row" && (x.item.row.left.type !== "equal" || x.item.row.right.type !== "equal"))
+                  .map(x => {
+                    const isAdded = x.item.type === "row" && x.item.row.right.type === "added";
+                    const color = isAdded ? "#10b981" : "#ef4444";
+                    const topPercent = (x.idx / visibleItems.length) * 100;
+                    return (
+                      <div 
+                        key={x.idx}
+                        style={{
+                          position: "absolute",
+                          top: `${topPercent}%`,
+                          left: 0,
+                          right: 0,
+                          height: "3px",
+                          backgroundColor: color,
+                          borderRadius: "2px",
+                          boxShadow: `0 0 4px ${color}`
+                        }}
+                      />
+                    );
+                  })}
+              </div>
+            )}
           </div>
         </>
       )}
