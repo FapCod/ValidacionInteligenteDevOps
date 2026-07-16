@@ -16,6 +16,7 @@ const ThemeContext = createContext<ThemeContextProps | undefined>(undefined);
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>("dark");
   const [animating, setAnimating] = useState(false);
+  const [targetTheme, setTargetTheme] = useState<Theme>("dark");
 
   useEffect(() => {
     // Leer el tema guardado en localStorage o usar el tema predeterminado oscuro
@@ -31,12 +32,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const toggleTheme = () => {
     if (animating) return;
 
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    setTargetTheme(nextTheme);
     setAnimating(true);
 
     // Iniciar la transición del velo:
     // Esperamos 450ms (punto central en que la pantalla está 100% cubierta) para conmutar las clases CSS
     setTimeout(() => {
-      const nextTheme = theme === "dark" ? "light" : "dark";
       setTheme(nextTheme);
       localStorage.setItem("theme", nextTheme);
       document.documentElement.className = nextTheme;
@@ -51,8 +53,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme }}>
       {children}
-      {/* Velo de transición de barrido lateral global */}
-      <div className={`theme-veil ${animating ? "active" : ""}`} />
+      {/* Cortina de transición teatral dividida global */}
+      {animating && (
+        <div className={`theme-curtain-overlay ${animating ? "active" : ""}`}>
+          <div className={`curtain-panel curtain-left ${targetTheme}`} />
+          <div className={`curtain-panel curtain-right ${targetTheme}`} />
+        </div>
+      )}
     </ThemeContext.Provider>
   );
 }

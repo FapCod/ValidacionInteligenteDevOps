@@ -1120,30 +1120,75 @@ html.light {
   --shadow-glow:        0 0 40px rgba(37, 99, 235, 0.05);
 }
 
-/* ─── Velo de Transición de Tema ──────────────────────────── */
-.theme-veil {
+/* ─── Cortina de Transición de Tema (Theater Curtain Effect) ── */
+.theme-curtain-overlay {
   position: fixed;
+  inset: 0;
+  z-index: 999999;
+  display: flex;
+  pointer-events: none;
+  width: 100vw;
+  height: 100vh;
+}
+
+.curtain-panel {
+  position: absolute;
   top: 0;
   bottom: 0;
-  width: 100vw;
-  z-index: 999999;
-  background: linear-gradient(135deg, var(--color-primary), #6366f1);
-  transform: translateX(-100%);
-  pointer-events: none;
+  width: 0%;
+  height: 100%;
 }
 
-.theme-veil.active {
-  animation: veilSwipe 0.9s cubic-bezier(0.76, 0, 0.24, 1) forwards;
+.curtain-panel.curtain-left {
+  left: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-@keyframes veilSwipe {
+.curtain-panel.curtain-right {
+  right: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Colores de cortina según el tema de destino */
+.curtain-panel.dark {
+  background: #0a0e1a; /* color de fondo oscuro de la app */
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+}
+
+.curtain-panel.light {
+  background: #f8fafc; /* color de fondo claro de la app */
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.06);
+}
+
+/* Activación de animación de cortina */
+.theme-curtain-overlay.active .curtain-panel.curtain-left {
+  animation: slideLeftCurtain 0.9s cubic-bezier(0.76, 0, 0.24, 1) forwards;
+}
+
+.theme-curtain-overlay.active .curtain-panel.curtain-right {
+  animation: slideRightCurtain 0.9s cubic-bezier(0.76, 0, 0.24, 1) forwards;
+}
+
+@keyframes slideLeftCurtain {
   0% {
-    transform: translateX(-100%);
+    width: 0%;
   }
   45%, 55% {
-    transform: translateX(0%);
+    width: 50%;
   }
   100% {
-    transform: translateX(100%);
+    width: 0%;
+  }
+}
+
+@keyframes slideRightCurtain {
+  0% {
+    width: 0%;
+  }
+  45%, 55% {
+    width: 50%;
+  }
+  100% {
+    width: 0%;
   }
 }

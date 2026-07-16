@@ -366,6 +366,7 @@ export default function FileComparator() {
   const [error,     setError]     = useState("");
   const [showDiff,  setShowDiff]  = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showBlockedModal, setShowBlockedModal] = useState(false);
 
   const resultRef = useRef<HTMLDivElement>(null);
 
@@ -468,6 +469,10 @@ export default function FileComparator() {
       }
       if (!response.ok) {
         const data = await response.json();
+        if (response.status === 403) {
+          setShowBlockedModal(true);
+          return;
+        }
         setError(data.error || "Error al validar. Intenta de nuevo.");
         setTimeout(() => {
           resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -671,6 +676,55 @@ export default function FileComparator() {
                 }}
               >
                 Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Bloqueo de IA (Acceso Denegado) */}
+      {showBlockedModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ border: "1px solid var(--color-error-border)", maxWidth: "440px" }}>
+            <div className="modal-header" style={{ marginBottom: "12px" }}>
+              <span className="modal-icon" style={{ color: "var(--color-error)" }}>🚫</span>
+              <h3 className="modal-title" style={{ color: "var(--color-text)" }}>Acceso Denegado</h3>
+            </div>
+            <p className="modal-text" style={{ fontSize: "0.92rem", lineHeight: "1.6", color: "var(--color-text-subtle)", margin: "0 0 20px 0" }}>
+              Tu usuario no tiene permitido validar con IA. Por favor, contacta a un administrador para solicitar el acceso.
+            </p>
+            <div className="modal-actions" style={{ justifyContent: "flex-end", gap: "10px" }}>
+              <a
+                href={`https://wa.me/51964972584?text=${encodeURIComponent(
+                  "Hola, solicito habilitar mi acceso para validar con IA en la plataforma ValidaDoc."
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-secondary"
+                style={{
+                  background: "rgba(16, 185, 129, 0.15)",
+                  color: "#10b981",
+                  border: "1px solid rgba(16, 185, 129, 0.3)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontSize: "0.85rem",
+                  textDecoration: "none",
+                  padding: "10px 16px",
+                }}
+              >
+                💬 Solicitar por WhatsApp
+              </a>
+              <button
+                className="btn btn-primary"
+                onClick={() => setShowBlockedModal(false)}
+                type="button"
+                style={{
+                  background: "linear-gradient(135deg, var(--color-error), #dc2626)",
+                  boxShadow: "0 4px 14px rgba(239, 68, 68, 0.3)",
+                }}
+              >
+                Cerrar
               </button>
             </div>
           </div>
