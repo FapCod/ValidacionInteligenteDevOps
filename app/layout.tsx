@@ -18,7 +18,21 @@ export default function RootLayout({
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        
+        {/* Pantalla de Bloqueo Móvil */}
+        <div className="mobile-blocker">
+          <div className="mobile-blocker-card">
+            <div className="mobile-blocker-icon">💻</div>
+            <h1 className="mobile-blocker-title">ValidaDoc está optimizado para Desktop</h1>
+            <p className="mobile-blocker-text">
+              Para realizar comparaciones lado a lado y análisis de código complejos, por el momento esta plataforma sólo es compatible con pantallas de escritorio (Desktop).
+            </p>
+            <div className="mobile-blocker-badge">Recomendado: 1024px o más</div>
+          </div>
+        </div>
+      </body>
     </html>
   );
 }

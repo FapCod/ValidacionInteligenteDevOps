@@ -881,3 +881,83 @@ a:hover { text-decoration: underline; }
   .history-table th:nth-child(3),
   .history-table td:nth-child(3) { display: none; }
 }
+
+/* ─── Mobile Blocker ───────────────────────────────────────── */
+.mobile-blocker {
+  display: none; /* Oculto por defecto en desktop */
+}
+
+@media (max-width: 1023px) {
+  /* Ocultar el layout completo de la app */
+  .auth-page,
+  .main-layout,
+  div[class*="main-layout"],
+  body > *:not(.mobile-blocker) {
+    display: none !important;
+  }
+
+  /* Mostrar la pantalla de bloqueo móvil */
+  .mobile-blocker {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    inset: 0;
+    background: var(--color-bg);
+    background-image: radial-gradient(circle at top, #0f1626, #0a0e1a);
+    z-index: 999999;
+    padding: 24px;
+    color: var(--color-text);
+    font-family: 'Inter', sans-serif;
+  }
+
+  .mobile-blocker-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: 40px 24px;
+    max-width: 420px;
+    text-align: center;
+    box-shadow: var(--shadow-card);
+    animation: slideUp 0.4s ease;
+  }
+
+  .mobile-blocker-icon {
+    font-size: 3.5rem;
+    margin-bottom: 20px;
+    display: inline-block;
+    animation: pulse-icon 2s infinite ease-in-out;
+  }
+
+  .mobile-blocker-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin-bottom: 12px;
+    color: var(--color-text);
+  }
+
+  .mobile-blocker-text {
+    font-size: 0.9rem;
+    color: var(--color-text-subtle);
+    line-height: 1.6;
+    margin-bottom: 24px;
+  }
+
+  .mobile-blocker-badge {
+    display: inline-block;
+    padding: 6px 14px;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid var(--color-primary-glow);
+    color: var(--color-primary);
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+}
+
+@keyframes pulse-icon {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 0px var(--color-primary-glow)); }
+  50% { transform: scale(1.08); filter: drop-shadow(0 0 15px var(--color-primary)); }
+}
