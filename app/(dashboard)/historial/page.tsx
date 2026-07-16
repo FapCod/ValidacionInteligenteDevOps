@@ -55,13 +55,9 @@ export default function HistorialPage() {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">
-          Historial de Validaciones {esAdmin && <span className="type-badge" style={{ verticalAlign: "middle", fontSize: "0.75rem", padding: "4px 8px", borderColor: "var(--color-primary)" }}>🛡️ Admin</span>}
-        </h1>
+        <h1 className="page-title">Historial de Validaciones</h1>
         <p className="page-subtitle">
-          {esAdmin
-            ? "Registro de tus validaciones personales de archivos de configuración (Vista Administrador)."
-            : "Registro de todas tus validaciones de archivos de configuración. Solo puedes ver tus propios registros."}
+          Registro de todas tus validaciones de archivos de configuración. Solo puedes ver tus propios registros.
         </p>
       </div>
 
