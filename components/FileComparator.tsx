@@ -92,6 +92,62 @@ function renderInlineDiff(oldText: string, newText: string, isRightSide: boolean
 // ─── Diff Side-by-Side Viewer ─────────────────────────────────────────────────
 function DiffViewer({ rows }: { rows: SideBySideRow[] }) {
   const [soloCambios, setSoloCambios] = useState(false);
+  const [diffWidth, setDiffWidth] = useState<string>("100%");
+  const [isDragging, setIsDragging] = useState(false);
+  const [activeHandle, setActiveHandle] = useState<"left" | "right" | null>(null);
+  const diffViewerRef = useRef<HTMLDivElement>(null);
+  const finalWidthRef = useRef<number>(1280);
+
+  useEffect(() => {
+    const savedWidth = localStorage.getItem("diff-viewer-width");
+    if (savedWidth) {
+      setDiffWidth(savedWidth);
+    }
+  }, []);
+
+  const handlePresetWidth = (width: string) => {
+    setDiffWidth(width);
+    localStorage.setItem("diff-viewer-width", width);
+  };
+
+  const handleMouseDown = (e: React.MouseEvent, handle: "left" | "right") => {
+    e.preventDefault();
+    setIsDragging(true);
+    setActiveHandle(handle);
+
+    const startX = e.clientX;
+    const startWidth = diffViewerRef.current ? diffViewerRef.current.offsetWidth : 1280;
+    finalWidthRef.current = startWidth;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      let newWidth = startWidth;
+      if (handle === "right") {
+        newWidth = startWidth + deltaX * 2;
+      } else {
+        newWidth = startWidth - deltaX * 2;
+      }
+      const minWidth = 800;
+      const maxWidth = window.innerWidth * 0.98;
+      newWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
+
+      setDiffWidth(`${newWidth}px`);
+      finalWidthRef.current = newWidth;
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      setActiveHandle(null);
+      localStorage.setItem("diff-viewer-width", `${finalWidthRef.current}px`);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
+  const isPreset = ["1000px", "100%", "1500px", "98vw"].includes(diffWidth);
 
   const addedCount   = rows.filter((r) => r.right.type === "added").length;
   const removedCount = rows.filter((r) => r.left.type  === "removed").length;
@@ -147,11 +203,74 @@ function DiffViewer({ rows }: { rows: SideBySideRow[] }) {
   const visibleItems = getVisibleRows();
 
   return (
-    <div className="diff-viewer">
+    <div 
+      className={`diff-viewer ${isDragging ? "dragging" : ""}`}
+      ref={diffViewerRef}
+      style={{ 
+        width: diffWidth, 
+        maxWidth: "98vw",
+        position: diffWidth !== "100%" ? "relative" : undefined,
+        left: diffWidth !== "100%" ? "50%" : undefined,
+        transform: diffWidth !== "100%" ? "translateX(-50%)" : undefined,
+        transition: isDragging ? "none" : "width 0.3s ease, left 0.3s ease, transform 0.3s ease",
+        zIndex: 10
+      }}
+    >
+      {/* Resizing Handles */}
+      <div 
+        className={`diff-resize-handle left ${activeHandle === "left" ? "active" : ""}`}
+        onMouseDown={(e) => handleMouseDown(e, "left")}
+        title="Arrastra para reducir o anchar"
+      />
+      <div 
+        className={`diff-resize-handle right ${activeHandle === "right" ? "active" : ""}`}
+        onMouseDown={(e) => handleMouseDown(e, "right")}
+        title="Arrastra para anchar o reducir"
+      />
+
       <div className="diff-header" style={{ flexWrap: "wrap", gap: "14px" }}>
         <span className="diff-title">📊 Diff Side-by-Side</span>
         
         <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+          {/* Selector de ancho */}
+          <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "0.8rem", color: "var(--color-text-subtle)" }}>
+            <span>↔️ Ancho: {!isPreset && <span style={{ color: "var(--color-primary)", fontWeight: "bold" }}>{diffWidth}</span>}</span>
+            <div style={{ display: "flex", background: "var(--color-bg-secondary)", borderRadius: "6px", padding: "2px", border: "1px solid var(--color-border-light)" }}>
+              <button
+                type="button"
+                onClick={() => handlePresetWidth("1000px")}
+                className={`btn-width-preset ${diffWidth === "1000px" ? "active" : ""}`}
+                title="Compacto (1000px)"
+              >
+                Compacto
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePresetWidth("100%")}
+                className={`btn-width-preset ${diffWidth === "100%" ? "active" : ""}`}
+                title="Normal (100%)"
+              >
+                Normal
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePresetWidth("1500px")}
+                className={`btn-width-preset ${diffWidth === "1500px" ? "active" : ""}`}
+                title="Ancho (1500px)"
+              >
+                Ancho
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePresetWidth("98vw")}
+                className={`btn-width-preset ${diffWidth === "98vw" ? "active" : ""}`}
+                title="Completo (98vw)"
+              >
+                Completo
+              </button>
+            </div>
+          </div>
+
           {/* Checkbox para ocultar líneas idénticas */}
           {!isIdentical && (
             <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "0.8rem", cursor: "pointer", userSelect: "none", color: "var(--color-text)" }}>

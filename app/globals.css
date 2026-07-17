@@ -523,7 +523,58 @@ a:hover { text-decoration: underline; }
   border-radius: var(--radius-lg);
   overflow: hidden;
   margin-bottom: 24px;
+  position: relative; /* Asegurar posicionamiento absoluto de los drag handles */
 }
+
+/* Drag Handles para redimensionar el Diff */
+.diff-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  z-index: 30;
+  transition: background-color 0.2s, border 0.2s;
+}
+.diff-resize-handle.left {
+  left: 0;
+}
+.diff-resize-handle.right {
+  right: 0;
+}
+.diff-resize-handle:hover,
+.diff-resize-handle.active {
+  background-color: rgba(59, 130, 246, 0.15);
+  border-left: 2px dashed var(--color-primary);
+  border-right: 2px dashed var(--color-primary);
+}
+
+/* Evitar selección de texto al arrastrar */
+.diff-viewer.dragging {
+  user-select: none;
+}
+
+/* Botones selectores de ancho */
+.btn-width-preset {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.btn-width-preset:hover {
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.05);
+}
+.btn-width-preset.active {
+  color: var(--color-primary);
+  background: var(--color-primary-glow);
+}
+
 
 .diff-header {
   display: flex;
