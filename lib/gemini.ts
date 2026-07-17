@@ -216,6 +216,7 @@ async function llamarAOpenRouter(
         ],
         temperature: 0.1,
       }),
+      signal: AbortSignal.timeout(25000), // Evita bloqueos indefinidos si OpenRouter responde lento
     });
 
     if (!response.ok) {
@@ -243,7 +244,9 @@ async function llamarAOpenRouter(
     if (isQuotaOrNotFoundError) {
       console.warn(`[OpenRouter Diagnosis] Falló el modelo ${modelName}. Motivo: ${errorObj.message}. Consultando catálogo de modelos de OpenRouter...`);
       try {
-        const diagResponse = await fetch("https://openrouter.ai/api/v1/models");
+        const diagResponse = await fetch("https://openrouter.ai/api/v1/models", {
+          signal: AbortSignal.timeout(5000)
+        });
         if (diagResponse.ok) {
           const diagData = await diagResponse.json();
           const listaModelos = diagData.data ? diagData.data.map((m: any) => m.id) : [];
@@ -328,6 +331,7 @@ async function llamarAGroq(
         temperature: 0.1,
         response_format: { type: "json_object" },
       }),
+      signal: AbortSignal.timeout(25000), // Evita bloqueos indefinidos si Groq responde lento
     });
 
     if (!response.ok) {
@@ -358,7 +362,8 @@ async function llamarAGroq(
         const diagResponse = await fetch("https://api.groq.com/openai/v1/models", {
           headers: {
             "Authorization": `Bearer ${apiKey}`,
-          }
+          },
+          signal: AbortSignal.timeout(5000)
         });
 
         if (diagResponse.ok) {
@@ -497,6 +502,25 @@ async function llamarAGemini(
   }
 }
 
+// Helper para reescribir errores de referencia física falsos positivos a un formato de sugerencia amigable
+function reescribirErrorFisico(errText: string): string {
+  const regex = /la columna\s+['"]?([a-zA-Z0-9_]+)['"]?\s+no existe\s+en la tabla\s+['"]?([a-zA-Z0-9_.]+)['"]?/i;
+  const match = errText.match(regex);
+  
+  if (match) {
+    const columna = match[1];
+    const tabla = match[2];
+    const lineInfoMatch = errText.match(/\((Línea aprox:.*?)\)/i);
+    const lineInfo = lineInfoMatch ? ` (${lineInfoMatch[1]})` : "";
+    
+    return `[Sugerencia] Por favor, verifica que la columna '${columna}' exista en la tabla/alias '${tabla}' en la base de datos de destino, ya que es una referencia nueva en este script.${lineInfo}`;
+  }
+  
+  // Fallback si no coincide con el regex exacto
+  const limpio = errText.replace(/^\[.*?\]\s*/, "");
+  return `[Sugerencia] ${limpio}`;
+}
+
 // ─── Orquestador de validación ────────────────────────────────────────────────
 export async function validarConIA(
   contenidoAntiguo: string,
@@ -532,6 +556,18 @@ export async function validarConIA(
 
   const colaIntentos: IntentoIA[] = [];
 
+  // Prioridad 1: OpenRouter (Gemini / Llama a través de OpenRouter)
+  if (openrouterApiKey) {
+    colaIntentos.push({
+      nombre: "OpenRouter",
+      ejecutar: async () => {
+        const { responseText, modelUsed } = await llamarAOpenRouter(openrouterApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo, activeSystemPrompt);
+        return { responseText, proveedor: `OpenRouter (${modelUsed})` };
+      },
+    });
+  }
+
+  // Prioridad 2: Google Gemini (Directo)
   if (geminiApiKey) {
     colaIntentos.push({
       nombre: "Google Gemini",
@@ -542,22 +578,13 @@ export async function validarConIA(
     });
   }
 
+  // Prioridad 3: Groq (Fallback final)
   if (groqApiKey) {
     colaIntentos.push({
       nombre: "Groq",
       ejecutar: async () => {
         const { responseText, modelUsed } = await llamarAGroq(groqApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo, activeSystemPrompt);
         return { responseText, proveedor: `Groq (${modelUsed})` };
-      },
-    });
-  }
-
-  if (openrouterApiKey) {
-    colaIntentos.push({
-      nombre: "OpenRouter",
-      ejecutar: async () => {
-        const { responseText, modelUsed } = await llamarAOpenRouter(openrouterApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo, activeSystemPrompt);
-        return { responseText, proveedor: `OpenRouter (${modelUsed})` };
       },
     });
   }
@@ -599,51 +626,76 @@ export async function validarConIA(
       const advertenciasAdicionales: string[] = [];
 
       if (Array.isArray(parsed.errores_criticos)) {
-        // Filtrar y degradar falsos positivos de la IA en archivos SQL/Tablas físicas
-        const erroresFiltrados = parsed.errores_criticos.filter((e: any) => {
-          const tipo = String(e.tipo || "").toLowerCase();
-          const desc = String(e.descripcion || "").toLowerCase();
-
-          // 1. Falsos positivos de referencia_inexistente en tablas/columnas físicas
-          if (tipo === "referencia_inexistente") {
-            const esTemporalOVariable = desc.includes("#") || desc.includes("@");
-            if (!esTemporalOVariable) {
-              console.warn(`[IA Orquestador] Degradando falso positivo de referencia inexistente física a advertencia: ${e.descripcion}`);
-              const lineInfo = e.linea_aproximada ? ` (Línea aprox: ${e.linea_aproximada})` : "";
-              advertenciasAdicionales.push(`[Sugerencia] ${e.descripcion}${lineInfo}`);
-              return false; // Se descarta como error crítico
-            }
-          }
-
-          // 2. Falsos positivos de compatibilidad_version sobre LEFT JOIN, JOIN, etc.
-          if (tipo === "compatibilidad_version" && desc.includes("join")) {
-            console.warn(`[IA Orquestador] Degradando falso positivo de compatibilidad de JOIN a advertencia: ${e.descripcion}`);
-            const lineInfo = e.linea_aproximada ? ` (Línea aprox: ${e.linea_aproximada})` : "";
-            advertenciasAdicionales.push(`[Sugerencia] ${e.descripcion}${lineInfo}`);
-            return false; // Se descarta como error crítico
-          }
-
-          return true;
-        });
-
-        errores = erroresFiltrados.map((e: any) => {
+        errores = parsed.errores_criticos.map((e: any) => {
           const lineInfo = e.linea_aproximada ? ` (Línea aprox: ${e.linea_aproximada})` : "";
           const tipo = e.tipo ? `[${e.tipo.toUpperCase()}] ` : "";
           return `${tipo}${e.descripcion}${lineInfo}`;
         });
       } else if (Array.isArray(parsed.errores)) {
-        errores = parsed.errores.map((e: any) => typeof e === "object" ? `${e.descripcion || JSON.stringify(e)}` : String(e));
+        errores = parsed.errores.map((e: any) => {
+          if (typeof e === "object") {
+            const lineInfo = e.linea_aproximada ? ` (Línea aprox: ${e.linea_aproximada})` : "";
+            const tipo = e.tipo ? `[${String(e.tipo).toUpperCase()}] ` : "";
+            return `${tipo}${e.descripcion || JSON.stringify(e)}${lineInfo}`;
+          }
+          const strError = String(e);
+          // Si el texto ya tiene un tipo entre corchetes, no lo duplicamos
+          if (strError.startsWith("[")) {
+            return strError;
+          }
+          return `[ERROR] ${strError}`;
+        });
       }
+
+      // Filtrar y degradar falsos positivos a nivel de string (Capa final de seguridad)
+      const erroresFiltrados = errores.filter((errText: string) => {
+        const lowerText = errText.toLowerCase();
+
+        // 1. Falsos positivos de referencia_inexistente en tablas/columnas físicas
+        const esReferenciaInexistente = lowerText.includes("referencia_inexistente") || lowerText.includes("no existe");
+        if (esReferenciaInexistente) {
+          const esTemporalOVariable = lowerText.includes("#") || lowerText.includes("@");
+          if (!esTemporalOVariable) {
+            console.warn(`[IA Orquestador] Degradando error de referencia física a sugerencia: ${errText}`);
+            const reescrito = reescribirErrorFisico(errText);
+            advertenciasAdicionales.push(reescrito);
+            return false; // Se remueve de errores críticos
+          }
+        }
+
+        // 2. Falsos positivos de compatibilidad de Joins
+        const esCompatibilidad = lowerText.includes("compatibilidad");
+        const esJoin = lowerText.includes("join");
+        if (esCompatibilidad && esJoin) {
+          console.warn(`[IA Orquestador] Degradando error de compatibilidad de join a sugerencia: ${errText}`);
+          const limpio = errText.replace(/^\[.*?\]\s*/, "");
+          advertenciasAdicionales.push(`[Sugerencia] ${limpio}`);
+          return false; // Se remueve de errores críticos
+        }
+
+        return true;
+      });
+
+      errores = erroresFiltrados;
 
       let advertencias: string[] = [];
       if (Array.isArray(parsed.advertencias)) {
         advertencias = parsed.advertencias.map((w: any) => {
+          let text = "";
           if (typeof w === "object") {
             const tipo = w.tipo ? `[${w.tipo.toUpperCase()}] ` : "";
             const lineInfo = w.linea_aproximada ? ` (Línea aprox: ${w.linea_aproximada})` : "";
-            return `${tipo}${w.descripcion}${lineInfo}`;
+            text = `${tipo}${w.descripcion}${lineInfo}`;
+          } else {
+            text = String(w);
           }
-          return String(w);
+
+          // Limpiar prefijos de tipo de error confuso en las advertencias
+          const lower = text.toLowerCase();
+          if (lower.includes("referencia_inexistente") || lower.includes("compatibilidad")) {
+            return reescribirErrorFisico(text);
+          }
+          return text;
         });
       }
 
