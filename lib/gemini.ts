@@ -24,6 +24,8 @@ Debes revisar los siguientes tipos de problemas, según el tipo de archivo detec
 
 - **Consistencia de atributos en tablas temporales**: Si el script crea o modifica una tabla temporal (#Tabla o ##Tabla) agregando una nueva columna, verifica que TODAS las referencias posteriores a esa tabla temporal (INSERT, SELECT, JOIN, UPDATE) sean consistentes con la nueva estructura. Si se agrega una columna en una definición de tabla temporal pero luego se usa en un INSERT o SELECT sin que exista en todas las instancias/creaciones de esa tabla temporal a lo largo del script, repórtalo como ERROR.
 - Si detectas que se usa una columna en un JOIN, WHERE o SELECT que no fue declarada en el CREATE TABLE de la tabla temporal correspondiente, repórtalo como error de referencia a columna inexistente.
+- **IMPORTANTE:** NO intentes validar si una columna o tabla existe o no en tablas físicas permanentes de la base de datos (por ejemplo, tablas que empiezan con ODS, DBO, etc., como ODS.CONSULTORA o DBO.PEDIDODD), ya que no posees el esquema de la base de datos física. Limita las validaciones de "referencia inexistente" estrictamente a variables declaradas (@Variable) o columnas de tablas temporales (#Tabla o variables de tipo TABLE @Tabla) que estén explícitamente declaradas en el código. Si tienes dudas sobre una columna en una tabla física, repórtala únicamente como una ADVERTENCIA, nunca como un ERROR CRÍTICO.
+- **Compatibilidad de Joins:** Sentencias estándar de unión (JOIN, INNER JOIN, LEFT JOIN, RIGHT JOIN, CROSS JOIN, FULL JOIN, CROSS APPLY, OUTER APPLY) son perfectamente compatibles con todas las versiones de SQL Server (desde SQL Server 2000 en adelante). NUNCA las reportes como incompatibilidades de versión.
 - Detecta sentencias 'CREATE OR ALTER' y advierte que esta sintaxis solo es compatible con SQL Server 2016 SP1 en adelante. Si el contexto o la configuración indica que el servidor de destino es una versión anterior (ej. SQL Server 2012, 2014, o 2016 sin SP1), márcalo como ERROR CRÍTICO de compatibilidad.
 - Detecta el uso de funciones o sintaxis específicas de versiones nuevas (ej: STRING_AGG requiere 2017+, funciones JSON requieren 2016+, DROP TABLE IF EXISTS requiere 2016+) y valida contra la versión de destino indicada.
 - Detecta DROP de columnas, tablas o procedimientos que puedan romper referencias existentes en el mismo script o en la comparación con la versión antigua.
@@ -125,20 +127,12 @@ function construirUserPrompt(
   contenidoNuevo: string,
   nombreArchivo: string
 ): string {
-  const combinadaLen = contenidoAntiguo.length + contenidoNuevo.length;
-  const LIMIT_CHARS = 10000; // ~2,500 tokens máximo
   const extension = nombreArchivo.split(".").pop()?.toLowerCase();
   const esSql = extension === "sql" || extension === "sp" || extension === "proc";
 
-  // Extraer declaraciones de SQL en caso de que sea un script SQL
-  let sqlContext = "";
-  if (esSql) {
-    sqlContext = extraerContextoDeclaracionesSql(contenidoNuevo);
-  }
-
-  // Siempre extraemos únicamente las diferencias y su contexto.
-  // Esto previene que la IA analice u observe código preexistente/heredado que no ha cambiado.
-  const diffLines = computeDiffWithContext(contenidoAntiguo, contenidoNuevo, 4);
+  // Configuración de contexto (Opción C: incrementado de 4 a 15 líneas para mayor cobertura de joins/alias)
+  const contextLines = 15;
+  const diffLines = computeDiffWithContext(contenidoAntiguo, contenidoNuevo, contextLines);
 
   let diffText = diffLines
     .map((line: DiffLine) => {
@@ -151,29 +145,34 @@ function construirUserPrompt(
     })
     .join("\n");
 
-  // Truncado de seguridad para controlar el consumo de tokens y prevenir timeouts en archivos masivos.
-  // LIMIT_CHARS (~12,000 caracteres) garantiza que la petición de tokens esté siempre por debajo del límite de Groq/OpenRouter.
+  const LIMIT_CHARS = 15000;
   if (diffText.length > LIMIT_CHARS) {
     diffText = diffText.slice(0, LIMIT_CHARS) + 
       "\n\n[... DIFERENCIAS ADICIONALES TRUNCADAS POR CAPACIDAD DE LA IA PARA EVITAR TIMEOUTS ...]";
   }
 
-  let prompt = `Archivo: ${nombreArchivo}
+  let prompt = `Archivo: ${nombreArchivo}\n\n`;
 
-A continuación se presentan únicamente las diferencias y los cambios detectados junto con algunas líneas de contexto alrededor de los mismos.`;
+  // Opción B: Si es SQL, incluimos el código completo del archivo nuevo además del diff
+  if (esSql) {
+    const maxSqlChars = 40000; // Límite de seguridad
+    let sqlCompleto = contenidoNuevo;
+    if (sqlCompleto.length > maxSqlChars) {
+      sqlCompleto = sqlCompleto.slice(0, maxSqlChars) + "\n\n[... CÓDIGO NUEVO TRUNCADO POR TAMAÑO EXCESIVO ...]";
+    }
 
-  // Si es SQL, inyectar el contexto estático de declaraciones que extrajimos de todo el archivo
-  if (esSql && sqlContext) {
-    prompt += `\n\n=== DECLARACIONES GLOBALES DE CONTEXTO (Tablas temporales y variables declaradas en el archivo) ===
-${sqlContext}
-
-(Utiliza estas definiciones para validar que cualquier variable o columna temporal utilizada en el diff realmente exista y esté declarada en el archivo. Si en el diff se inserta en una tabla temporal, valida que coincida con las columnas definidas arriba).`;
+    prompt += `=== CÓDIGO COMPLETO DEL NUEVO ARCHIVO (Para contexto de alias, tablas y tipos) ===\n`;
+    prompt += `${sqlCompleto}\n\n`;
+    prompt += `=== DIFERENCIAS DETECTADAS (Enfoque de la revisión) ===\n`;
+    prompt += `Usa el código completo anterior como contexto para entender los joins y alias, pero enfoca tu análisis únicamente en las diferencias del diff presentadas abajo:\n\n`;
+    prompt += `${diffText}\n\n`;
+    prompt += `Analiza las diferencias apoyándote en el código completo para identificar errores y responde en JSON.`;
+  } else {
+    prompt += `A continuación se presentan únicamente las diferencias y los cambios detectados junto con algunas líneas de contexto alrededor de los mismos (rango de 15 líneas).\n\n`;
+    prompt += `=== DIFERENCIAS DETECTADAS ===\n`;
+    prompt += `${diffText}\n\n`;
+    prompt += `Analiza las diferencias apoyándote en el contexto para identificar errores y responde en JSON.`;
   }
-
-  prompt += `\n\n=== DIFERENCIAS DETECTADAS ===
-${diffText}
-
-Analiza las diferencias apoyándote en el contexto para identificar errores y responde en JSON.`;
 
   return prompt;
 }
@@ -597,8 +596,37 @@ export async function validarConIA(
 
       // Convertir el formato extendido de errores y advertencias al formato clásico
       let errores: string[] = [];
+      const advertenciasAdicionales: string[] = [];
+
       if (Array.isArray(parsed.errores_criticos)) {
-        errores = parsed.errores_criticos.map((e: any) => {
+        // Filtrar y degradar falsos positivos de la IA en archivos SQL/Tablas físicas
+        const erroresFiltrados = parsed.errores_criticos.filter((e: any) => {
+          const tipo = String(e.tipo || "").toLowerCase();
+          const desc = String(e.descripcion || "").toLowerCase();
+
+          // 1. Falsos positivos de referencia_inexistente en tablas/columnas físicas
+          if (tipo === "referencia_inexistente") {
+            const esTemporalOVariable = desc.includes("#") || desc.includes("@");
+            if (!esTemporalOVariable) {
+              console.warn(`[IA Orquestador] Degradando falso positivo de referencia inexistente física a advertencia: ${e.descripcion}`);
+              const lineInfo = e.linea_aproximada ? ` (Línea aprox: ${e.linea_aproximada})` : "";
+              advertenciasAdicionales.push(`[Sugerencia] ${e.descripcion}${lineInfo}`);
+              return false; // Se descarta como error crítico
+            }
+          }
+
+          // 2. Falsos positivos de compatibilidad_version sobre LEFT JOIN, JOIN, etc.
+          if (tipo === "compatibilidad_version" && desc.includes("join")) {
+            console.warn(`[IA Orquestador] Degradando falso positivo de compatibilidad de JOIN a advertencia: ${e.descripcion}`);
+            const lineInfo = e.linea_aproximada ? ` (Línea aprox: ${e.linea_aproximada})` : "";
+            advertenciasAdicionales.push(`[Sugerencia] ${e.descripcion}${lineInfo}`);
+            return false; // Se descarta como error crítico
+          }
+
+          return true;
+        });
+
+        errores = erroresFiltrados.map((e: any) => {
           const lineInfo = e.linea_aproximada ? ` (Línea aprox: ${e.linea_aproximada})` : "";
           const tipo = e.tipo ? `[${e.tipo.toUpperCase()}] ` : "";
           return `${tipo}${e.descripcion}${lineInfo}`;
@@ -619,9 +647,12 @@ export async function validarConIA(
         });
       }
 
+      // Combinar con las advertencias adicionales degradadas
+      advertencias = [...advertencias, ...advertenciasAdicionales];
+
       console.log(`[IA Orquestador] validación completada con éxito por: ${intento.nombre}`);
       return {
-        valido: parsed.valido,
+        valido: errores.length === 0,
         errores,
         advertencias,
         resumen: parsed.resumen || "Sin resumen disponible",

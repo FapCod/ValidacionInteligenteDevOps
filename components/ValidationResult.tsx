@@ -361,53 +361,61 @@ export default function ValidationResultPanel({ result, nombreArchivo = "archivo
 
   return (
     <div className={`result-card ${valido ? "valid" : "invalid"}`} style={{ position: "relative" }}>
-      {/* Badge de Proveedor */}
-      {proveedor && (
-        <span 
-          style={{
-            position: "absolute",
-            top: "14px",
-            right: "16px",
-            fontSize: "0.72rem",
-            background: "rgba(255, 255, 255, 0.05)",
-            border: "1px solid rgba(255, 255, 255, 0.1)",
-            padding: "3px 10px",
-            borderRadius: "12px",
-            color: "var(--color-text-subtle)",
-            fontWeight: 600,
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "5px"
-          }}
-        >
-          🤖 Motor: {proveedor}
-        </span>
-      )}
-
-      {/* Botón de Descargar Certificado (PDF) */}
-      <button
-        onClick={handleDownloadPDF}
-        className="btn btn-sm btn-secondary"
+      {/* Acciones del encabezado agrupadas en Flexbox para evitar superposición */}
+      <div 
         style={{
           position: "absolute",
           top: "14px",
-          right: proveedor ? "160px" : "16px",
-          padding: "4px 12px",
-          fontSize: "0.72rem",
-          fontWeight: 600,
-          background: "var(--color-bg-secondary)",
-          border: "1px solid var(--color-border-light)",
-          color: "var(--color-text)",
-          display: "inline-flex",
+          right: "16px",
+          display: "flex",
           alignItems: "center",
-          gap: "5px",
-          cursor: "pointer"
+          gap: "10px",
+          zIndex: 10
         }}
-        type="button"
-        title="Descargar Certificado de Validación en PDF"
       >
-        📄 Descargar PDF
-      </button>
+        {/* Botón de Descargar Certificado (PDF) */}
+        <button
+          onClick={handleDownloadPDF}
+          className="btn btn-sm btn-secondary"
+          style={{
+            padding: "4px 12px",
+            fontSize: "0.72rem",
+            fontWeight: 600,
+            background: "var(--color-bg-secondary)",
+            border: "1px solid var(--color-border-light)",
+            color: "var(--color-text)",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "5px",
+            cursor: "pointer"
+          }}
+          type="button"
+          title="Descargar Certificado de Validación en PDF"
+        >
+          📄 Descargar PDF
+        </button>
+
+        {/* Badge de Proveedor */}
+        {proveedor && (
+          <span 
+            style={{
+              fontSize: "0.72rem",
+              background: "rgba(255, 255, 255, 0.05)",
+              border: "1px solid rgba(255, 255, 255, 0.1)",
+              padding: "3px 10px",
+              borderRadius: "12px",
+              color: "var(--color-text-subtle)",
+              fontWeight: 600,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "5px",
+              whiteSpace: "nowrap"
+            }}
+          >
+            🤖 Motor: {proveedor}
+          </span>
+        )}
+      </div>
 
       {/* Header */}
       <div className="result-header" style={{ paddingRight: proveedor ? "300px" : "150px" }}>
