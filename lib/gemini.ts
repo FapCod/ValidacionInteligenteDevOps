@@ -37,7 +37,7 @@ Debes revisar los siguientes tipos de problemas, según el tipo de archivo detec
 ## 3. VALIDACIONES GENERALES (cualquier tipo de archivo)
 
 - Compara estructura antigua vs nueva y señala cualquier eliminación, duplicación o modificación que parezca no intencional
-- Si el nombre del archivo, comentarios, o contexto indican el ambiente de destino, siempre valida que las referencias internas (URLs, connection strings, nombres de servidor) sean coherentes con ese ambiente
+- Si los comentarios o el contexto indican el ambiente de destino, siempre valida que las referencias internas (URLs, connection strings, nombres de servidor) sean coherentes con ese ambiente (IGNORA el nombre del archivo para esto).
 
 ## 4. FOCO EN LOS NUEVOS CAMBIOS Y ERRORES PRE-EXISTENTES
 
@@ -160,7 +160,8 @@ function construirUserPrompt(
       "\n\n[... DIFERENCIAS ADICIONALES TRUNCADAS POR CAPACIDAD DE LA IA PARA EVITAR TIMEOUTS ...]";
   }
 
-  let prompt = `Archivo: ${nombreArchivo}\n\n`;
+  // IGNORA EL NOMBRE FÍSICO DEL ARCHIVO PARA PREVENIR ALUCINACIONES DE AMBIENTES
+  let prompt = `Tipo de Archivo: ${esSql ? "SQL" : extension}\n\n`;
 
   // Opción B: Si es SQL, incluimos el código completo del archivo nuevo además del diff
   if (esSql) {
@@ -209,33 +210,63 @@ async function llamarAOpenRouter(
   const userPrompt = construirUserPrompt(contenidoAntiguo, contenidoNuevo, nombreArchivo);
 
   const requestCompletion = async (selectedModel: string): Promise<CompletionSuccess | CompletionError> => {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-        "X-Title": "ValidaDoc",
-      },
-      body: JSON.stringify({
-        model: selectedModel,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        temperature: 0.1,
-      }),
-      signal: AbortSignal.timeout(25000), // Evita bloqueos indefinidos si OpenRouter responde lento
-    });
+    let intentos = 0;
+    const maxIntentos = 3;
+    let delayMs = 1500;
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      return { error: true, status: response.status, message: errorText };
+    while (intentos < maxIntentos) {
+      try {
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+            "X-Title": "ValidaDoc",
+          },
+          body: JSON.stringify({
+            model: selectedModel,
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt },
+            ],
+            temperature: 0.1,
+          }),
+          signal: AbortSignal.timeout(25000), // Evita bloqueos indefinidos si OpenRouter responde lento
+        });
+
+        if (response.status === 429 || response.status === 503 || response.status === 502) {
+          intentos++;
+          if (intentos >= maxIntentos) {
+            const errorText = await response.text();
+            return { error: true, status: response.status, message: errorText };
+          }
+          console.warn(`[OpenRouter Retry] Recibido código temporal ${response.status}. Reintentando ${intentos}/${maxIntentos} en ${delayMs}ms...`);
+          await delay(delayMs);
+          delayMs *= 2;
+          continue;
+        }
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          return { error: true, status: response.status, message: errorText };
+        }
+
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content || "";
+        return { responseText: content, modelUsed: selectedModel };
+
+      } catch (err: any) {
+        intentos++;
+        if (intentos >= maxIntentos) {
+          throw err;
+        }
+        console.warn(`[OpenRouter Retry] Fallo de conexión o timeout: ${err?.message || err}. Reintentando ${intentos}/${maxIntentos} en ${delayMs}ms...`);
+        await delay(delayMs);
+        delayMs *= 2;
+      }
     }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || "";
-    return { responseText: content, modelUsed: selectedModel };
+    throw new Error("Se superó el límite de reintentos en OpenRouter.");
   };
 
   let result = await requestCompletion(modelName);
@@ -324,32 +355,62 @@ async function llamarAGroq(
   const userPrompt = construirUserPrompt(contenidoAntiguo, contenidoNuevo, nombreArchivo);
 
   const requestCompletion = async (selectedModel: string): Promise<CompletionSuccess | CompletionError> => {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: selectedModel,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        temperature: 0.1,
-        response_format: { type: "json_object" },
-      }),
-      signal: AbortSignal.timeout(25000), // Evita bloqueos indefinidos si Groq responde lento
-    });
+    let intentos = 0;
+    const maxIntentos = 3;
+    let delayMs = 1500;
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      return { error: true, status: response.status, message: errorText };
+    while (intentos < maxIntentos) {
+      try {
+        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: selectedModel,
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt },
+            ],
+            temperature: 0.1,
+            response_format: { type: "json_object" },
+          }),
+          signal: AbortSignal.timeout(25000), // Evita bloqueos indefinidos si Groq responde lento
+        });
+
+        if (response.status === 429 || response.status === 503 || response.status === 502) {
+          intentos++;
+          if (intentos >= maxIntentos) {
+            const errorText = await response.text();
+            return { error: true, status: response.status, message: errorText };
+          }
+          console.warn(`[Groq Retry] Recibido código temporal ${response.status}. Reintentando ${intentos}/${maxIntentos} en ${delayMs}ms...`);
+          await delay(delayMs);
+          delayMs *= 2;
+          continue;
+        }
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          return { error: true, status: response.status, message: errorText };
+        }
+
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content || "";
+        return { responseText: content, modelUsed: selectedModel };
+
+      } catch (err: any) {
+        intentos++;
+        if (intentos >= maxIntentos) {
+          throw err;
+        }
+        console.warn(`[Groq Retry] Fallo de conexión o timeout: ${err?.message || err}. Reintentando ${intentos}/${maxIntentos} en ${delayMs}ms...`);
+        await delay(delayMs);
+        delayMs *= 2;
+      }
     }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || "";
-    return { responseText: content, modelUsed: selectedModel };
+    throw new Error("Se superó el límite de reintentos en Groq.");
   };
 
   let result = await requestCompletion(modelName);
@@ -454,12 +515,39 @@ async function llamarAGemini(
       { apiVersion }
     );
 
-    const result = await model.generateContent([
-      { text: systemPrompt },
-      { text: userPrompt },
-    ]);
+    let intentos = 0;
+    const maxIntentos = 3;
+    let delayMs = 1500;
 
-    return { responseText: result.response.text(), modelUsed: selectedModel };
+    while (intentos < maxIntentos) {
+      try {
+        const result = await model.generateContent([
+          { text: systemPrompt },
+          { text: userPrompt },
+        ]);
+        return { responseText: result.response.text(), modelUsed: selectedModel };
+      } catch (err: any) {
+        intentos++;
+        const errStr = String(err?.message || err || "").toLowerCase();
+        const esTemporal = 
+          errStr.includes("429") || 
+          errStr.includes("quota") || 
+          errStr.includes("503") || 
+          errStr.includes("502") || 
+          errStr.includes("overloaded") || 
+          errStr.includes("busy") ||
+          errStr.includes("demand");
+
+        if (esTemporal && intentos < maxIntentos) {
+          console.warn(`[Gemini Retry] Error temporal (${err?.message || err}). Reintentando ${intentos}/${maxIntentos} en ${delayMs}ms...`);
+          await delay(delayMs);
+          delayMs *= 2;
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new Error("Se superó el límite de reintentos en Google Gemini.");
   };
 
   try {
@@ -508,6 +596,46 @@ async function llamarAGemini(
     }
     throw err;
   }
+}
+
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Extrae números de línea de las observaciones en varios formatos (ej: "Línea aprox: 99", "Líneas aprox: 72-74", "línea 99")
+function extraerNumerosDeLinea(texto: string): number[] {
+  const regex = /l[íi]nea[s]?\s*aprox:?\s*([0-9\-\s,y]+)/i;
+  const match = texto.match(regex);
+  if (!match) {
+    const matchSimple = texto.match(/l[íi]nea\s*([0-9]+)/i);
+    if (matchSimple) {
+      return [parseInt(matchSimple[1], 10)];
+    }
+    return [];
+  }
+  
+  const numsText = match[1];
+  const numeros: number[] = [];
+  const parts = numsText.split(/[\s,y\-_]+/); // Separar por guiones, comas o espacios
+  for (const part of parts) {
+    const n = parseInt(part, 10);
+    if (!isNaN(n)) {
+      numeros.push(n);
+    }
+  }
+  
+  // Si tenía un rango (ej: "72-74" que terminó separado en [72, 74]), rellenar los números intermedios
+  if (numeros.length === 2 && numsText.includes("-")) {
+    const start = numeros[0];
+    const end = numeros[1];
+    if (start < end) {
+      const rellenos: number[] = [];
+      for (let i = start; i <= end; i++) {
+        rellenos.push(i);
+      }
+      return rellenos;
+    }
+  }
+  
+  return numeros;
 }
 
 // Helper para reescribir errores de referencia física falsos positivos a un formato de sugerencia amigable
@@ -598,39 +726,85 @@ function consolidarAdvertencias(advertencias: string[]): string[] {
   return resultado;
 }
 
-// Helper para filtrar advertencias semánticamente duplicadas
+// Helper para filtrar advertencias semánticamente duplicadas (desduplicación genérica por palabras clave)
 function filtrarDuplicadosSemanticos(advertencias: string[]): string[] {
-  const columnasSugeridas = new Set<string>();
-  const regexEspecifica = /Por favor, verifica que la columna '([a-zA-Z0-9_]+)' exista/i;
+  const STOP_WORDS = new Set([
+    "el", "la", "los", "las", "un", "una", "unos", "unas", "de", "del", "en", "para", "por", "con", "sin", "sobre", "tras", "y", "o", "pero", "mas", "si", "no", "se", "lo", "le", "les", "me", "te", "nos", "os", "mi", "tu", "su", "sus", "como", "que", "al", "es", "son", "fue", "fueron", "ser", "estar", "tiene", "tienen", "existe", "existen", "tabla", "tablas", "columna", "columnas", "base", "datos", "destino", "sugerencia", "error", "advertencia", "aproximada", "linea", "lineas", "aprox", "verificar", "validar", "revisar", "sql", "server", "consulta", "script", "archivo", "nuevo", "antiguo", "agregado", "eliminado", "pre-existente", "despliegue", "produccion", "ambiente", "entorno", "desarrollo", "pruebas", "cambio", "cambios", "codigo", "sintaxis", "ejecucion", "rendimiento", "optimizar", "buena", "practica", "por", "favor", "debe", "deben", "recomienda", "sugiere", "verifica", "indica", "destinado", "utiliza", "construccion"
+  ]);
 
-  for (const adv of advertencias) {
-    const match = adv.match(regexEspecifica);
-    if (match) {
-      columnasSugeridas.add(match[1]);
+  const obtenerPalabrasClave = (texto: string): Set<string> => {
+    const limpio = texto
+      .toLowerCase()
+      .replace(/[\[\](){}'".,;:\-_?¿!¡+\/=]/g, " ");
+    const palabras = limpio.split(/\s+/);
+    const keywords = new Set<string>();
+    for (const p of palabras) {
+      const palabra = p.trim();
+      if (palabra.length >= 3 && isNaN(Number(palabra)) && !STOP_WORDS.has(palabra)) {
+        keywords.add(palabra);
+      }
+    }
+    return keywords;
+  };
+
+  // 1. Clasificar y ordenar las advertencias por orden de relevancia:
+  // Primero específicas (con line numbers o prefijos), ordenadas por longitud descendente.
+  // Luego genéricas, ordenadas por longitud descendente.
+  const clasificadas = advertencias.map(adv => {
+    const esEspecifica = 
+      adv.includes("[AGREGADO]") || 
+      adv.includes("[ELIMINADO]") || 
+      adv.includes("[Pre-existente]") || 
+      extraerNumerosDeLinea(adv).length > 0;
+    return { adv, esEspecifica, length: adv.length };
+  });
+
+  clasificadas.sort((a, b) => {
+    if (a.esEspecifica && !b.esEspecifica) return -1;
+    if (!a.esEspecifica && b.esEspecifica) return 1;
+    return b.length - a.length; // El más largo primero para conservar más detalle
+  });
+
+  const resultado: string[] = [];
+  const conjuntosPalabrasAceptados: Set<string>[] = [];
+
+  // 2. Filtrar por solapamiento de palabras clave
+  for (const item of clasificadas) {
+    const keywordsActual = obtenerPalabrasClave(item.adv);
+    
+    if (keywordsActual.size === 0) {
+      resultado.push(item.adv);
+      continue;
+    }
+
+    let esDuplicado = false;
+    for (const keywordsAceptadas of conjuntosPalabrasAceptados) {
+      let interseccion = 0;
+      for (const kw of keywordsActual) {
+        if (keywordsAceptadas.has(kw)) {
+          interseccion++;
+        }
+      }
+
+      // Solapamiento respecto al conjunto de palabras de la advertencia analizada
+      const porcentajeSolapamiento = interseccion / keywordsActual.size;
+
+      // Si el 60% o más de las palabras clave de esta sugerencia ya están en otra sugerencia más detallada
+      if (porcentajeSolapamiento >= 0.60) {
+        console.log(`[IA Orquestador] Filtrando duplicado semántico general por solapamiento del ${(porcentajeSolapamiento * 100).toFixed(1)}%: "${item.adv}"`);
+        esDuplicado = true;
+        break;
+      }
+    }
+
+    if (!esDuplicado) {
+      resultado.push(item.adv);
+      conjuntosPalabrasAceptados.push(keywordsActual);
     }
   }
 
-  return advertencias.filter(adv => {
-    // Si es la advertencia específica formateada, la conservamos siempre
-    if (regexEspecifica.test(adv)) {
-      return true;
-    }
-
-    // Si es otra advertencia, verificar si menciona alguna columna que ya tiene alerta específica
-    for (const col of columnasSugeridas) {
-      if (
-        adv.includes(`'${col}'`) || 
-        adv.includes(`.${col}`) || 
-        adv.includes(`(${col}`) || 
-        adv.includes(` ${col}`) || 
-        adv.includes(`"${col}"`)
-      ) {
-        console.log(`[IA Orquestador] Filtrando advertencia general redundante que menciona columna específica: "${adv}"`);
-        return false;
-      }
-    }
-    return true;
-  });
+  // Devolver las advertencias aceptadas en su orden original
+  return advertencias.filter(adv => resultado.includes(adv));
 }
 
 // ─── Orquestador de validación ────────────────────────────────────────────────
@@ -710,6 +884,15 @@ export async function validarConIA(
     };
   }
 
+  // Calcular las líneas modificadas reales para determinar automáticamente observaciones pre-existentes
+  const diffLinesMod = computeDiffWithContext(contenidoAntiguo, contenidoNuevo, 0);
+  const lineasModificadas = new Set<number>();
+  for (const line of diffLinesMod) {
+    if (line.type === "added" && line.lineNew) {
+      lineasModificadas.add(line.lineNew);
+    }
+  }
+
   console.log(`[IA Orquestador] Lanzando consultas en paralelo a ${proveedores.length} proveedores...`);
 
   // Lanzar en paralelo
@@ -729,10 +912,10 @@ export async function validarConIA(
     return {
       valido: false,
       errores: [
-        `Todos los proveedores de IA configurados fallaron: ${detallesFallos}`,
+        `Límite de cuota excedido o saturación de API (429/Too Many Requests): Todos los proveedores de IA fallaron. Detalle: ${detallesFallos}. Por favor, espera un momento antes de reintentar, o configura claves de API de producción con mayor cuota en tu archivo .env.local.`,
       ],
       advertencias: [],
-      resumen: "No se pudo completar la validación automática con ningún proveedor de IA.",
+      resumen: "No se pudo completar la validación automática debido a límites de cuota en los proveedores de IA.",
       proveedor: "Todos los proveedores fallaron",
     };
   }
@@ -824,6 +1007,28 @@ export async function validarConIA(
         }
 
         return true;
+      }).map((errText: string) => {
+        let text = errText;
+        const lineasAlerta = extraerNumerosDeLinea(text);
+        if (lineasAlerta.length > 0 && !text.includes("[Pre-existente]")) {
+          const tieneLineaNueva = lineasAlerta.some(n => lineasModificadas.has(n));
+          if (!tieneLineaNueva) {
+            text = `[Pre-existente] ${text}`;
+          }
+        }
+        return text;
+      }).filter((text: string) => {
+        const lower = text.toLowerCase();
+        const esPositiva = 
+          lower.includes("no se detect") || 
+          lower.includes("no se encontr") || 
+          lower.includes("no se identific") || 
+          lower.includes("no se observ") ||
+          lower.includes("no presenta problemas") ||
+          lower.includes("no presenta errores") ||
+          lower.includes("no contiene problemas") ||
+          lower.includes("no contiene errores");
+        return !esPositiva;
       });
 
       // Mapear advertencias locales
@@ -841,9 +1046,36 @@ export async function validarConIA(
 
           const lower = text.toLowerCase();
           if (lower.includes("referencia_inexistente") || lower.includes("compatibilidad")) {
-            return reescribirErrorFisico(text);
+            text = reescribirErrorFisico(text);
           }
+
+          // Auto-etiquetar advertencias como pre-existentes si la línea no está modificada en el diff
+          const lineasAlerta = extraerNumerosDeLinea(text);
+          if (lineasAlerta.length > 0 && !text.includes("[Pre-existente]")) {
+            const tieneLineaNueva = lineasAlerta.some(n => lineasModificadas.has(n));
+            if (!tieneLineaNueva) {
+              text = `[Pre-existente] ${text}`;
+            }
+          }
+
           return text;
+        }).filter((text: string) => {
+          const lower = text.toLowerCase();
+          const esPositiva = 
+            lower.includes("no se detect") || 
+            lower.includes("no se encontr") || 
+            lower.includes("no se identific") || 
+            lower.includes("no se observ") ||
+            lower.includes("no presenta problemas") ||
+            lower.includes("no presenta errores") ||
+            lower.includes("no contiene problemas") ||
+            lower.includes("no contiene errores");
+          
+          if (esPositiva) {
+            console.log(`[IA Orquestador] Filtrando confirmación positiva irrelevante: "${text}"`);
+            return false;
+          }
+          return true;
         });
       }
 

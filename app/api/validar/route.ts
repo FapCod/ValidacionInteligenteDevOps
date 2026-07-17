@@ -110,6 +110,30 @@ export async function POST(request: NextRequest) {
 
   const extension = nombreSanitizado.split(".").pop()?.toLowerCase();
 
+  // ─── Caché Inteligente de Validaciones (Supabase) ──────────────────────────
+  try {
+    const { data: cacheData, error: cacheError } = await supabase
+      .from("validaciones")
+      .select("resultado_ia")
+      .eq("contenido_antiguo", contenido_antiguo)
+      .eq("contenido_nuevo", contenido_nuevo)
+      .limit(1)
+      .maybeSingle();
+
+    if (!cacheError && cacheData?.resultado_ia) {
+      console.log(`[/api/validar] Caché HIT para archivo '${nombreSanitizado}'. Retornando resultado guardado.`);
+      return NextResponse.json(cacheData.resultado_ia, {
+        status: 200,
+        headers: {
+          "X-Cache": "HIT",
+          "X-RateLimit-Remaining": String(remaining),
+        },
+      });
+    }
+  } catch (err) {
+    console.warn("[/api/validar] Error al consultar la caché de validaciones:", err);
+  }
+
   // ─── Validación Sintáctica Local Determinista (JSON y XML) ───────────────
   // Si el archivo está físicamente roto a nivel de estructura, no es necesario llamar a la IA.
   if (extension === "json" || contenido_nuevo.trim().startsWith("{") || contenido_nuevo.trim().startsWith("[")) {

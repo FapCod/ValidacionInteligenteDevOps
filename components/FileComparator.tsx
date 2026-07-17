@@ -540,6 +540,27 @@ export default function FileComparator() {
   const [showDiff,  setShowDiff]  = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showBlockedModal, setShowBlockedModal] = useState(false);
+  const [showNoChangesModal, setShowNoChangesModal] = useState(false);
+  
+  // Guardar el estado de los archivos validados con éxito para detectar si sufrieron cambios
+  const [ultimoValidadoAntiguo, setUltimoValidadoAntiguo] = useState<string | null>(null);
+  const [ultimoValidadoNuevo,   setUltimoValidadoNuevo]   = useState<string | null>(null);
+
+  // Contador de segundos transcurridos durante la validación activa
+  const [segundosTranscurridos, setSegundosTranscurridos] = useState(0);
+
+  useEffect(() => {
+    let interval: any = null;
+    if (loading) {
+      setSegundosTranscurridos(0);
+      interval = setInterval(() => {
+        setSegundosTranscurridos((prev) => prev + 1);
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [loading]);
 
   const resultRef = useRef<HTMLDivElement>(null);
 
@@ -655,6 +676,8 @@ export default function FileComparator() {
 
       const resData = await response.json();
       setResult(resData);
+      setUltimoValidadoAntiguo(contenidoAntiguo);
+      setUltimoValidadoNuevo(contenidoNuevo);
       
       // Auto-desplazar de forma fluida a los resultados del análisis
       setTimeout(() => {
@@ -681,6 +704,9 @@ export default function FileComparator() {
     setResult(null);
     setError("");
     setShowDiff(false);
+    setShowNoChangesModal(false);
+    setUltimoValidadoAntiguo(null);
+    setUltimoValidadoNuevo(null);
   };
 
   return (
@@ -743,7 +769,21 @@ export default function FileComparator() {
 
           <button
             className="btn btn-primary btn-lg"
-            onClick={() => setShowConfirmModal(true)}
+            onClick={() => {
+              const esMismoQueUltimaVez = 
+                ultimoValidadoAntiguo !== null &&
+                ultimoValidadoNuevo !== null &&
+                contenidoAntiguo === ultimoValidadoAntiguo &&
+                contenidoNuevo === ultimoValidadoNuevo;
+
+              const sonIdenticosEntreSi = contenidoAntiguo.trim() === contenidoNuevo.trim();
+
+              if (esMismoQueUltimaVez || sonIdenticosEntreSi) {
+                setShowNoChangesModal(true);
+              } else {
+                setShowConfirmModal(true);
+              }
+            }}
             disabled={!canValidate || loading}
             id="btn-validar"
             type="button"
@@ -751,7 +791,7 @@ export default function FileComparator() {
             {loading ? (
               <>
                 <span className="spinner" />
-                Analizando con IA...
+                Analizando con IA ({segundosTranscurridos}s)...
               </>
             ) : (
               "⚡ Validar con IA"
@@ -759,7 +799,7 @@ export default function FileComparator() {
           </button>
 
           {(contenidoAntiguo || contenidoNuevo) && (
-            <button className="btn btn-secondary" onClick={handleReset} type="button">
+            <button className="btn btn-secondary" onClick={handleReset} disabled={loading} type="button">
               ↩ Resetear
             </button>
           )}
@@ -849,6 +889,35 @@ export default function FileComparator() {
                 }}
               >
                 Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Advertencia de Sin Cambios */}
+      {showNoChangesModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: "440px" }}>
+            <div className="modal-header">
+              <span className="modal-icon">ℹ️</span>
+              <h3 className="modal-title">Sin cambios detectados</h3>
+            </div>
+            <p className="modal-text">
+              No has realizado ninguna modificación en los archivos. Se seguirán mostrando las mismas observaciones en pantalla.
+            </p>
+            <div className="modal-actions" style={{ justifyContent: "flex-end" }}>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  setShowNoChangesModal(false);
+                  if (result === null) {
+                    handleValidar();
+                  }
+                }}
+                type="button"
+              >
+                Aceptar
               </button>
             </div>
           </div>
