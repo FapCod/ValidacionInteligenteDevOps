@@ -25,17 +25,26 @@ Debes revisar los siguientes tipos de problemas, según el tipo de archivo detec
 - **Consistencia de atributos en tablas temporales**: Si el script crea o modifica una tabla temporal (#Tabla o ##Tabla) agregando una nueva columna, verifica que TODAS las referencias posteriores a esa tabla temporal (INSERT, SELECT, JOIN, UPDATE) sean consistentes con la nueva estructura. Si se agrega una columna en una definición de tabla temporal pero luego se usa en un INSERT o SELECT sin que exista en todas las instancias/creaciones de esa tabla temporal a lo largo del script, repórtalo como ERROR.
 - Si detectas que se usa una columna en un JOIN, WHERE o SELECT que no fue declarada en el CREATE TABLE de la tabla temporal correspondiente, repórtalo como error de referencia a columna inexistente.
 - **IMPORTANTE:** NO intentes validar si una columna o tabla existe o no en tablas físicas permanentes de la base de datos (por ejemplo, tablas que empiezan con ODS, DBO, etc., como ODS.CONSULTORA o DBO.PEDIDODD), ya que no posees el esquema de la base de datos física. Limita las validaciones de "referencia inexistente" estrictamente a variables declaradas (@Variable) o columnas de tablas temporales (#Tabla o variables de tipo TABLE @Tabla) que estén explícitamente declaradas en el código. Si tienes dudas sobre una columna en una tabla física, repórtala únicamente como una ADVERTENCIA, nunca como un ERROR CRÍTICO.
-- **Compatibilidad de Joins:** Sentencias estándar de unión (JOIN, INNER JOIN, LEFT JOIN, RIGHT JOIN, CROSS JOIN, FULL JOIN, CROSS APPLY, OUTER APPLY) son perfectamente compatibles con todas las versiones de SQL Server (desde SQL Server 2000 en adelante). NUNCA las reportes como incompatibilidades de versión.
-- Detecta sentencias 'CREATE OR ALTER' y advierte que esta sintaxis solo es compatible con SQL Server 2016 SP1 en adelante. Si el contexto o la configuración indica que el servidor de destino es una versión anterior (ej. SQL Server 2012, 2014, o 2016 sin SP1), márcalo como ERROR CRÍTICO de compatibilidad.
-- Detecta el uso de funciones o sintaxis específicas de versiones nuevas (ej: STRING_AGG requiere 2017+, funciones JSON requieren 2016+, DROP TABLE IF EXISTS requiere 2016+) y valida contra la versión de destino indicada.
+- **Compatibilidad de Joins:** Sentencias estándar de unión (JOIN, INNER JOIN, LEFT JOIN, RIGHT JOIN, CROSS JOIN, FULL JOIN, CROSS APPLY, OUTER APPLY) son perfectamente compatibles con todas las versiones de SQL Server. NUNCA las reportes como incompatibilidades de versión.
+- **Joins redundantes o no usados:** Si detectas que se ha agregado un JOIN (por ejemplo, LEFT JOIN) pero no se proyectan sus columnas ni se usan en el WHERE, repórtalo únicamente como una ADVERTENCIA/SUGERENCIA de rendimiento. NUNCA lo reportes como un ERROR CRÍTICO, ya que la consulta compila y se ejecuta perfectamente.
+- **Compatibilidad de versión como ADVERTENCIA (no bloqueante):** A menos que se trate de un error de sintaxis SQL básico que falle en todas las versiones, los posibles problemas de compatibilidad de versión (por ejemplo, el uso de 'CREATE OR ALTER', 'IIF', 'STRING_AGG', etc.) deben clasificarse SIEMPRE como ADVERTENCIAS (no bloqueantes) y nunca como ERRORES CRÍTICOS.
+- **Versión de SQL Server por defecto:** A menos que el archivo contenga un comentario explícito indicando lo contrario, asume siempre que la versión de base de datos de destino es SQL Server 2016 o superior. NUNCA evalúes compatibilidad contra SQL Server 2000, 2005 o 2008 de forma predeterminada.
 - Detecta DROP de columnas, tablas o procedimientos que puedan romper referencias existentes en el mismo script o en la comparación con la versión antigua.
 - Detecta transacciones sin manejo de errores (BEGIN TRAN sin TRY/CATCH o sin COMMIT/ROLLBACK correspondiente).
 - Detecta cambios de tipo de dato en columnas ya existentes que puedan causar truncamiento o pérdida de datos (ej: de NVARCHAR(200) a NVARCHAR(50)).
+- **IGNORA EL NOMBRE DEL ARCHIVO:** No valides si el nombre físico del archivo coincide con el Stored Procedure o el objeto SQL declarado adentro. Concéntrate únicamente en el contenido de la consulta y la lógica SQL.
 
 ## 3. VALIDACIONES GENERALES (cualquier tipo de archivo)
 
 - Compara estructura antigua vs nueva y señala cualquier eliminación, duplicación o modificación que parezca no intencional
 - Si el nombre del archivo, comentarios, o contexto indican el ambiente de destino, siempre valida que las referencias internas (URLs, connection strings, nombres de servidor) sean coherentes con ese ambiente
+
+## 4. FOCO EN LOS NUEVOS CAMBIOS Y ERRORES PRE-EXISTENTES
+
+- **Tu foco principal de revisión son los cambios introducidos en la versión NUEVA.** Estos se identifican por estar marcados con la etiqueta '[AGREGADO]' o '[ELIMINADO]'.
+- **NO reportes advertencias ni errores sobre código que ya existía en la versión ANTIGUA (marcado con la etiqueta '[CONTEXTO]') y que no ha sido alterado en esta versión.**
+- Si identificas un error extremadamente grave o crítico en el código antiguo que representa un riesgo inminente de caída en producción, y consideras indispensable reportarlo, **debes obligatoriamente iniciar su descripción con la etiqueta '[Pre-existente]'** (ejemplo: "[Pre-existente] Se seleccionan dos columnas con el mismo alias...").
+- Para todo error o advertencia introducido por los nuevos cambios (etiquetas '[AGREGADO]' o '[ELIMINADO]'), **NO utilices** el prefijo '[Pre-existente]'.
 
 ## CONTEXTO QUE RECIBIRÁS
 
@@ -253,9 +262,8 @@ async function llamarAOpenRouter(
           console.warn("[OpenRouter Diagnosis] Modelos disponibles en catálogo:", listaModelos.length, "modelos encontrados.");
 
           const prioridadesOpenRouter = [
-            "google/gemini-2.5-flash:free",
-            "google/gemini-2.0-flash-exp:free",
-            "meta-llama/llama-3.1-8b-instruct:free",
+            "meta-llama/llama-3.3-70b-instruct:free",
+            "meta-llama/llama-3.2-3b-instruct:free",
             "qwen/qwen-2.5-coder-32b-instruct:free",
             "openrouter/free"
           ];
@@ -504,21 +512,125 @@ async function llamarAGemini(
 
 // Helper para reescribir errores de referencia física falsos positivos a un formato de sugerencia amigable
 function reescribirErrorFisico(errText: string): string {
+  const esPreExistente = errText.startsWith("[Pre-existente]") || errText.includes("[Pre-existente]");
+  const baseText = esPreExistente ? errText.replace(/^\[Pre-existente\]\s*/i, "").replace(/\[Pre-existente\]/i, "") : errText;
+
   const regex = /la columna\s+['"]?([a-zA-Z0-9_]+)['"]?\s+no existe\s+en la tabla\s+['"]?([a-zA-Z0-9_.]+)['"]?/i;
-  const match = errText.match(regex);
+  const match = baseText.match(regex);
   
+  const prefijo = esPreExistente ? "[Pre-existente] " : "";
+
   if (match) {
     const columna = match[1];
     const tabla = match[2];
-    const lineInfoMatch = errText.match(/\((Línea aprox:.*?)\)/i);
+    const lineInfoMatch = baseText.match(/\((Líneas? aprox:.*?)\)/i) || errText.match(/\((Líneas? aprox:.*?)\)/i);
     const lineInfo = lineInfoMatch ? ` (${lineInfoMatch[1]})` : "";
     
-    return `[Sugerencia] Por favor, verifica que la columna '${columna}' exista en la tabla/alias '${tabla}' en la base de datos de destino, ya que es una referencia nueva en este script.${lineInfo}`;
+    return `[Sugerencia] ${prefijo}Por favor, verifica que la columna '${columna}' exista en la tabla/alias '${tabla}' en la base de datos de destino, ya que es una referencia nueva en este script.${lineInfo}`;
   }
   
   // Fallback si no coincide con el regex exacto
-  const limpio = errText.replace(/^\[.*?\]\s*/, "");
-  return `[Sugerencia] ${limpio}`;
+  const limpio = baseText.replace(/^\[.*?\]\s*/, "");
+  return `[Sugerencia] ${prefijo}${limpio}`;
+}
+
+// Helper para consolidar sugerencias repetidas y agrupar sus líneas en un solo mensaje
+function consolidarAdvertencias(advertencias: string[]): string[] {
+  const agrupadas = new Map<string, Set<string>>(); // Clave: "tabla.columna.tipo" -> Set de líneas
+  const otrasAdvertencias = new Set<string>();
+
+  // Regex que ignora la presencia o no del prefijo [Pre-existente]
+  const regexCheck = /^\[Sugerencia\]\s*(?:\[Pre-existente\]\s*)?Por favor, verifica que la columna '([a-zA-Z0-9_]+)' exista en la tabla\/alias '([a-zA-Z0-9_.]+)' en la base de datos de destino/i;
+
+  for (const adv of advertencias) {
+    const match = adv.match(regexCheck);
+    if (match) {
+      const columna = match[1];
+      const tabla = match[2];
+      const esPreExistente = adv.includes("[Pre-existente]");
+      const key = `${tabla}.${columna}.${esPreExistente ? "pre" : "new"}`;
+
+      // Extraer línea si existe
+      const lineInfoMatch = adv.match(/\((Líneas? aprox:.*?)\)/i);
+      let linea = "";
+      if (lineInfoMatch) {
+        linea = lineInfoMatch[1].replace(/Líneas? aprox:\s*/i, "").trim();
+      }
+
+      if (!agrupadas.has(key)) {
+        agrupadas.set(key, new Set<string>());
+      }
+      if (linea) {
+        linea.split(",").forEach(l => agrupadas.get(key)!.add(l.trim()));
+      }
+    } else {
+      otrasAdvertencias.add(adv);
+    }
+  }
+
+  const resultado: string[] = [];
+
+  // Agregar las agrupadas formateadas
+  agrupadas.forEach((lineas, key) => {
+    const [tabla, columna, tipo] = key.split(".");
+    const esPre = tipo === "pre";
+    const lineasArr = Array.from(lineas).sort((a, b) => {
+      const numA = parseInt(a.replace(/\D/g, ""), 10) || 0;
+      const numB = parseInt(b.replace(/\D/g, ""), 10) || 0;
+      return numA - numB;
+    });
+
+    const prefixLinea = lineasArr.length > 1 ? "Líneas" : "Línea";
+    const lineasStr = lineasArr.length > 0 
+      ? ` (${prefixLinea} aprox: ${lineasArr.join(", ")})` 
+      : "";
+    
+    const prefijoPre = esPre ? "[Pre-existente] " : "";
+    
+    resultado.push(
+      `[Sugerencia] ${prefijoPre}Por favor, verifica que la columna '${columna}' exista en la tabla/alias '${tabla}' en la base de datos de destino, ya que es una referencia nueva en este script.${lineasStr}`
+    );
+  });
+
+  // Agregar las otras
+  otrasAdvertencias.forEach(adv => resultado.push(adv));
+
+  return resultado;
+}
+
+// Helper para filtrar advertencias semánticamente duplicadas
+function filtrarDuplicadosSemanticos(advertencias: string[]): string[] {
+  const columnasSugeridas = new Set<string>();
+  const regexEspecifica = /Por favor, verifica que la columna '([a-zA-Z0-9_]+)' exista/i;
+
+  for (const adv of advertencias) {
+    const match = adv.match(regexEspecifica);
+    if (match) {
+      columnasSugeridas.add(match[1]);
+    }
+  }
+
+  return advertencias.filter(adv => {
+    // Si es la advertencia específica formateada, la conservamos siempre
+    if (regexEspecifica.test(adv)) {
+      return true;
+    }
+
+    // Si es otra advertencia, verificar si menciona alguna columna que ya tiene alerta específica
+    for (const col of columnasSugeridas) {
+      if (
+        adv.includes(`'${col}'`) || 
+        adv.includes(`.${col}`) || 
+        adv.includes(`(${col}`) || 
+        adv.includes(` ${col}`) || 
+        adv.includes(`"${col}"`)
+      ) {
+        console.log(`[IA Orquestador] Filtrando advertencia general redundante que menciona columna específica: "${adv}"`);
+        return false;
+      }
+    }
+    return true;
+  });
 }
 
 // ─── Orquestador de validación ────────────────────────────────────────────────
@@ -548,17 +660,16 @@ export async function validarConIA(
     console.warn("[IA Orquestador] No se pudo leer configuraciones de la BD, usando prompt estático por defecto:", dbErr);
   }
 
-  // Definimos la lista de intentos estructurada con sus prioridades y claves
-  interface IntentoIA {
+  // Definimos la lista de proveedores a consultar en paralelo
+  interface ProveedorIA {
     nombre: string;
     ejecutar: () => Promise<{ responseText: string; proveedor: string }>;
   }
 
-  const colaIntentos: IntentoIA[] = [];
+  const proveedores: ProveedorIA[] = [];
 
-  // Prioridad 1: OpenRouter (Gemini / Llama a través de OpenRouter)
   if (openrouterApiKey) {
-    colaIntentos.push({
+    proveedores.push({
       nombre: "OpenRouter",
       ejecutar: async () => {
         const { responseText, modelUsed } = await llamarAOpenRouter(openrouterApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo, activeSystemPrompt);
@@ -567,9 +678,8 @@ export async function validarConIA(
     });
   }
 
-  // Prioridad 2: Google Gemini (Directo)
   if (geminiApiKey) {
-    colaIntentos.push({
+    proveedores.push({
       nombre: "Google Gemini",
       ejecutar: async () => {
         const { responseText, modelUsed } = await llamarAGemini(contenidoAntiguo, contenidoNuevo, nombreArchivo, activeSystemPrompt);
@@ -578,9 +688,8 @@ export async function validarConIA(
     });
   }
 
-  // Prioridad 3: Groq (Fallback final)
   if (groqApiKey) {
-    colaIntentos.push({
+    proveedores.push({
       nombre: "Groq",
       ejecutar: async () => {
         const { responseText, modelUsed } = await llamarAGroq(groqApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo, activeSystemPrompt);
@@ -589,7 +698,7 @@ export async function validarConIA(
     });
   }
 
-  if (colaIntentos.length === 0) {
+  if (proveedores.length === 0) {
     return {
       valido: false,
       errores: [
@@ -601,15 +710,45 @@ export async function validarConIA(
     };
   }
 
-  const erroresAcumulados: string[] = [];
+  console.log(`[IA Orquestador] Lanzando consultas en paralelo a ${proveedores.length} proveedores...`);
 
-  // Ejecución secuencial (Fallback en cadena)
-  for (const intento of colaIntentos) {
+  // Lanzar en paralelo
+  const promesas = proveedores.map(p => 
+    p.ejecutar()
+      .then(res => ({ nombre: p.nombre, success: true as const, res }))
+      .catch(err => ({ nombre: p.nombre, success: false as const, error: err?.message || String(err) }))
+  );
+
+  const resultados = await Promise.all(promesas);
+
+  const exitosos = resultados.filter(r => r.success);
+  const fallidos = resultados.filter(r => !r.success);
+
+  if (exitosos.length === 0) {
+    const detallesFallos = fallidos.map(f => `${f.nombre}: ${f.error}`).join(" | ");
+    return {
+      valido: false,
+      errores: [
+        `Todos los proveedores de IA configurados fallaron: ${detallesFallos}`,
+      ],
+      advertencias: [],
+      resumen: "No se pudo completar la validación automática con ningún proveedor de IA.",
+      proveedor: "Todos los proveedores fallaron",
+    };
+  }
+
+  // Colecciones para consolidar los resultados
+  const erroresConsolidados = new Set<string>();
+  const advertenciasConsolidadas = new Set<string>();
+  const resumenesConsolidados: string[] = [];
+  const proveedoresExitosos: string[] = [];
+
+  for (const item of exitosos) {
+    const { responseText, proveedor } = item.res;
+    proveedoresExitosos.push(proveedor);
+
     try {
-      console.log(`[IA Orquestador] Intentando validación con proveedor: ${intento.nombre}...`);
-      const { responseText, proveedor } = await intento.ejecutar();
-
-      // Limpieza estándar del JSON por si la IA introduce formato markdown
+      // Limpieza estándar del JSON
       const cleaned = responseText
         .replace(/```json\n?/g, "")
         .replace(/```\n?/g, "")
@@ -617,38 +756,31 @@ export async function validarConIA(
 
       const parsed = JSON.parse(cleaned);
 
-      if (typeof parsed.valido !== "boolean") {
-        throw new Error("Respuesta de IA con estructura de JSON inválida");
-      }
-
-      // Convertir el formato extendido de errores y advertencias al formato clásico
-      let errores: string[] = [];
+      // Convertir el formato de errores
+      let erroresLocal: string[] = [];
       const advertenciasAdicionales: string[] = [];
 
       if (Array.isArray(parsed.errores_criticos)) {
-        errores = parsed.errores_criticos.map((e: any) => {
+        erroresLocal = parsed.errores_criticos.map((e: any) => {
           const lineInfo = e.linea_aproximada ? ` (Línea aprox: ${e.linea_aproximada})` : "";
           const tipo = e.tipo ? `[${e.tipo.toUpperCase()}] ` : "";
           return `${tipo}${e.descripcion}${lineInfo}`;
         });
       } else if (Array.isArray(parsed.errores)) {
-        errores = parsed.errores.map((e: any) => {
+        erroresLocal = parsed.errores.map((e: any) => {
           if (typeof e === "object") {
             const lineInfo = e.linea_aproximada ? ` (Línea aprox: ${e.linea_aproximada})` : "";
             const tipo = e.tipo ? `[${String(e.tipo).toUpperCase()}] ` : "";
             return `${tipo}${e.descripcion || JSON.stringify(e)}${lineInfo}`;
           }
           const strError = String(e);
-          // Si el texto ya tiene un tipo entre corchetes, no lo duplicamos
-          if (strError.startsWith("[")) {
-            return strError;
-          }
+          if (strError.startsWith("[")) return strError;
           return `[ERROR] ${strError}`;
         });
       }
 
       // Filtrar y degradar falsos positivos a nivel de string (Capa final de seguridad)
-      const erroresFiltrados = errores.filter((errText: string) => {
+      const erroresFiltrados = erroresLocal.filter((errText: string) => {
         const lowerText = errText.toLowerCase();
 
         // 1. Falsos positivos de referencia_inexistente en tablas/columnas físicas
@@ -659,7 +791,7 @@ export async function validarConIA(
             console.warn(`[IA Orquestador] Degradando error de referencia física a sugerencia: ${errText}`);
             const reescrito = reescribirErrorFisico(errText);
             advertenciasAdicionales.push(reescrito);
-            return false; // Se remueve de errores críticos
+            return false;
           }
         }
 
@@ -670,17 +802,34 @@ export async function validarConIA(
           console.warn(`[IA Orquestador] Degradando error de compatibilidad de join a sugerencia: ${errText}`);
           const limpio = errText.replace(/^\[.*?\]\s*/, "");
           advertenciasAdicionales.push(`[Sugerencia] ${limpio}`);
-          return false; // Se remueve de errores críticos
+          return false;
+        }
+
+        // 3. Falsos positivos de compatibilidad de versiones (IIF, CREATE OR ALTER, etc.)
+        const esCompatibilidadVersion = lowerText.includes("compatibilidad") || lowerText.includes("versión") || lowerText.includes("create or alter") || lowerText.includes("iif") || lowerText.includes("isnull") || lowerText.includes("convert");
+        if (esCompatibilidadVersion) {
+          console.warn(`[IA Orquestador] Degradando error de compatibilidad de versión a sugerencia: ${errText}`);
+          const limpio = errText.replace(/^\[.*?\]\s*/, "");
+          advertenciasAdicionales.push(`[Sugerencia] ${limpio}`);
+          return false;
+        }
+
+        // 4. Falsos positivos de Joins redundantes o no utilizados (deben ser sugerencias, no errores críticos)
+        const esJoinRedundante = lowerText.includes("join") && (lowerText.includes("no se utiliza") || lowerText.includes("no es utilizada") || lowerText.includes("redundante") || lowerText.includes("no proyecta") || lowerText.includes("basura") || lowerText.includes("incompleto"));
+        if (esJoinRedundante) {
+          console.warn(`[IA Orquestador] Degradando error de join redundante a sugerencia: ${errText}`);
+          const limpio = errText.replace(/^\[.*?\]\s*/, "");
+          advertenciasAdicionales.push(`[Sugerencia] ${limpio}`);
+          return false;
         }
 
         return true;
       });
 
-      errores = erroresFiltrados;
-
-      let advertencias: string[] = [];
+      // Mapear advertencias locales
+      let advertenciasLocal: string[] = [];
       if (Array.isArray(parsed.advertencias)) {
-        advertencias = parsed.advertencias.map((w: any) => {
+        advertenciasLocal = parsed.advertencias.map((w: any) => {
           let text = "";
           if (typeof w === "object") {
             const tipo = w.tipo ? `[${w.tipo.toUpperCase()}] ` : "";
@@ -690,7 +839,6 @@ export async function validarConIA(
             text = String(w);
           }
 
-          // Limpiar prefijos de tipo de error confuso en las advertencias
           const lower = text.toLowerCase();
           if (lower.includes("referencia_inexistente") || lower.includes("compatibilidad")) {
             return reescribirErrorFisico(text);
@@ -699,33 +847,47 @@ export async function validarConIA(
         });
       }
 
-      // Combinar con las advertencias adicionales degradadas
-      advertencias = [...advertencias, ...advertenciasAdicionales];
+      // Agregar a colecciones consolidadas
+      erroresFiltrados.forEach(err => erroresConsolidados.add(err));
+      advertenciasLocal.forEach(adv => advertenciasConsolidadas.add(adv));
+      advertenciasAdicionales.forEach(adv => advertenciasConsolidadas.add(adv));
 
-      console.log(`[IA Orquestador] validación completada con éxito por: ${intento.nombre}`);
-      return {
-        valido: errores.length === 0,
-        errores,
-        advertencias,
-        resumen: parsed.resumen || "Sin resumen disponible",
-        proveedor,
-      };
-    } catch (err: any) {
-      const msg = err?.message || "Error desconocido";
-      console.warn(`[IA Orquestador] Falló ${intento.nombre}: ${msg}. Intentando siguiente proveedor...`);
-      erroresAcumulados.push(`${intento.nombre}: ${msg}`);
+      if (parsed.resumen) {
+        resumenesConsolidados.push(`${item.nombre}: ${parsed.resumen}`);
+      }
+
+    } catch (parseErr: any) {
+      console.error(`[IA Orquestador] Error al procesar respuesta de ${item.nombre}:`, parseErr.message || parseErr);
     }
   }
 
-  // Si llegamos aquí es porque TODOS los proveedores de la cola fallaron
+  const erroresFinales: string[] = [];
+  const advertenciasFinales = Array.from(advertenciasConsolidadas);
+
+  // Separar los errores pre-existentes para moverlos a la sección de advertencias no bloqueantes
+  for (const err of erroresConsolidados) {
+    if (err.includes("[Pre-existente]")) {
+      console.warn(`[IA Orquestador] Moviendo error pre-existente a advertencias para no bloquear el despliegue: ${err}`);
+      advertenciasFinales.push(err);
+    } else {
+      erroresFinales.push(err);
+    }
+  }
+
+  // Unir los resúmenes de los modelos de forma elegante
+  const resumenFinal = resumenesConsolidados.length > 0 
+    ? resumenesConsolidados.join("\n\n")
+    : "Validación completada sin resumen disponible.";
+
+  const proveedorFinal = `Consenso: ${proveedoresExitosos.join(" + ")}`;
+
+  console.log(`[IA Orquestador] Consolidación completada con éxito. Proveedores: ${proveedoresExitosos.join(", ")}`);
+
   return {
-    valido: false,
-    errores: [
-      "Todos los proveedores de IA configurados fallaron o excedieron sus cuotas:",
-      ...erroresAcumulados.map((e) => `• ${e}`),
-    ],
-    advertencias: [],
-    resumen: "No se pudo completar la validación automática con ningún proveedor de IA.",
-    proveedor: "Todos los proveedores fallaron",
+    valido: erroresFinales.length === 0,
+    errores: erroresFinales,
+    advertencias: filtrarDuplicadosSemanticos(consolidarAdvertencias(advertenciasFinales)),
+    resumen: resumenFinal,
+    proveedor: proveedorFinal,
   };
 }
