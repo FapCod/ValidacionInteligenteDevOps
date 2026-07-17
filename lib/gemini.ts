@@ -1123,3 +1123,145 @@ export async function validarConIA(
     proveedor: proveedorFinal,
   };
 }
+
+// Post-procesador para aplicar filtros dinámicos (degradar errores físicos, compatibilidad, etc.) en caliente
+export function postProcesarResultadoIA(
+  result: ValidationResult,
+  contenidoAntiguo: string,
+  contenidoNuevo: string
+): ValidationResult {
+  // Calcular las líneas modificadas reales para determinar automáticamente observaciones pre-existentes
+  const diffLinesMod = computeDiffWithContext(contenidoAntiguo, contenidoNuevo, 0);
+  const lineasModificadas = new Set<number>();
+  for (const line of diffLinesMod) {
+    if (line.type === "added" && line.lineNew) {
+      lineasModificadas.add(line.lineNew);
+    }
+  }
+
+  const erroresConsolidados = new Set<string>();
+  const advertenciasConsolidadas = new Set<string>();
+  const advertenciasAdicionales: string[] = [];
+
+  const erroresLocales = result.errores || [];
+  const erroresFiltrados = erroresLocales.filter((errText: string) => {
+    const lowerText = errText.toLowerCase();
+
+    // 1. Falsos positivos de referencia_inexistente en tablas/columnas físicas
+    const esReferenciaInexistente = lowerText.includes("referencia_inexistente") || lowerText.includes("no existe");
+    if (esReferenciaInexistente) {
+      const esTemporalOVariable = lowerText.includes("#") || lowerText.includes("@");
+      if (!esTemporalOVariable) {
+        const reescrito = reescribirErrorFisico(errText);
+        advertenciasAdicionales.push(reescrito);
+        return false;
+      }
+    }
+
+    // 2. Falsos positivos de compatibilidad de Joins
+    const esCompatibilidad = lowerText.includes("compatibilidad");
+    const esJoin = lowerText.includes("join");
+    if (esCompatibilidad && esJoin) {
+      const limpio = errText.replace(/^\[.*?\]\s*/, "");
+      advertenciasAdicionales.push(`[Sugerencia] ${limpio}`);
+      return false;
+    }
+
+    // 3. Falsos positivos de compatibilidad de versiones (IIF, CREATE OR ALTER, etc.)
+    const esCompatibilidadVersion = lowerText.includes("compatibilidad") || lowerText.includes("versión") || lowerText.includes("create or alter") || lowerText.includes("iif") || lowerText.includes("isnull") || lowerText.includes("convert");
+    if (esCompatibilidadVersion) {
+      const limpio = errText.replace(/^\[.*?\]\s*/, "");
+      advertenciasAdicionales.push(`[Sugerencia] ${limpio}`);
+      return false;
+    }
+
+    // 4. Falsos positivos de Joins redundantes o no utilizados
+    const esJoinRedundante = lowerText.includes("join") && (lowerText.includes("no se utiliza") || lowerText.includes("no es utilizada") || lowerText.includes("redundante") || lowerText.includes("no proyecta") || lowerText.includes("basura") || lowerText.includes("incompleto"));
+    if (esJoinRedundante) {
+      const limpio = errText.replace(/^\[.*?\]\s*/, "");
+      advertenciasAdicionales.push(`[Sugerencia] ${limpio}`);
+      return false;
+    }
+
+    return true;
+  }).map((errText: string) => {
+    let text = errText;
+    const lineasAlerta = extraerNumerosDeLinea(text);
+    if (lineasAlerta.length > 0 && !text.includes("[Pre-existente]")) {
+      const tieneLineaNueva = lineasAlerta.some(n => lineasModificadas.has(n));
+      if (!tieneLineaNueva) {
+        text = `[Pre-existente] ${text}`;
+      }
+    }
+    return text;
+  }).filter((text: string) => {
+    const lower = text.toLowerCase();
+    const esPositiva = 
+      lower.includes("no se detect") || 
+      lower.includes("no se encontr") || 
+      lower.includes("no se identific") || 
+      lower.includes("no se observ") ||
+      lower.includes("no presenta problemas") ||
+      lower.includes("no presenta errores") ||
+      lower.includes("no contiene problemas") ||
+      lower.includes("no contiene errores");
+    return !esPositiva;
+  });
+
+  erroresFiltrados.forEach(err => erroresConsolidados.add(err));
+
+  const advertenciasLocales = result.advertencias || [];
+  const advertenciasMapeadas = advertenciasLocales.map((w: string) => {
+    let text = w;
+    const lower = text.toLowerCase();
+    if (lower.includes("referencia_inexistente") || lower.includes("compatibilidad")) {
+      text = reescribirErrorFisico(text);
+    }
+
+    const lineasAlerta = extraerNumerosDeLinea(text);
+    if (lineasAlerta.length > 0 && !text.includes("[Pre-existente]")) {
+      const tieneLineaNueva = lineasAlerta.some(n => lineasModificadas.has(n));
+      if (!tieneLineaNueva) {
+        text = `[Pre-existente] ${text}`;
+      }
+    }
+    return text;
+  }).filter((text: string) => {
+    const lower = text.toLowerCase();
+    const esPositiva = 
+      lower.includes("no se detect") || 
+      lower.includes("no se encontr") || 
+      lower.includes("no se identific") || 
+      lower.includes("no se observ") ||
+      lower.includes("no presenta problemas") ||
+      lower.includes("no presenta errores") ||
+      lower.includes("no contiene problemas") ||
+      lower.includes("no contiene errores");
+    return !esPositiva;
+  });
+
+  advertenciasMapeadas.forEach(adv => advertenciasConsolidadas.add(adv));
+  advertenciasAdicionales.forEach(adv => advertenciasConsolidadas.add(adv));
+
+  const erroresFinales: string[] = [];
+  const advertenciasFinales = Array.from(advertenciasConsolidadas);
+
+  for (const err of erroresConsolidados) {
+    if (err.includes("[Pre-existente]")) {
+      advertenciasFinales.push(err);
+    } else {
+      erroresFinales.push(err);
+    }
+  }
+
+  const advertenciasConsolidadasFinal = consolidarAdvertencias(advertenciasFinales);
+  const advertenciasFiltradas = filtrarDuplicadosSemanticos(advertenciasConsolidadasFinal);
+
+  return {
+    valido: erroresFinales.length === 0,
+    errores: erroresFinales,
+    advertencias: advertenciasFiltradas,
+    resumen: result.resumen,
+    proveedor: result.proveedor
+  };
+}

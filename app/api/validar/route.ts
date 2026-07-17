@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, AuthError } from "@/lib/auth";
-import { validarConIA } from "@/lib/gemini";
+import { validarConIA, postProcesarResultadoIA } from "@/lib/gemini";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { createSupabaseServerClient } from "@/lib/supabase";
 import { validarXml } from "@/lib/xmlValidator";
@@ -122,7 +122,8 @@ export async function POST(request: NextRequest) {
 
     if (!cacheError && cacheData?.resultado_ia) {
       console.log(`[/api/validar] Caché HIT para archivo '${nombreSanitizado}'. Retornando resultado guardado.`);
-      return NextResponse.json(cacheData.resultado_ia, {
+      const cleanResult = postProcesarResultadoIA(cacheData.resultado_ia as any, contenido_antiguo, contenido_nuevo);
+      return NextResponse.json(cleanResult, {
         status: 200,
         headers: {
           "X-Cache": "HIT",
