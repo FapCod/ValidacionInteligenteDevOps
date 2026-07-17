@@ -178,6 +178,17 @@ Analiza las diferencias apoyándote en el contexto para identificar errores y re
   return prompt;
 }
 
+interface CompletionSuccess {
+  responseText: string;
+  modelUsed: string;
+}
+
+interface CompletionError {
+  error: true;
+  status: number;
+  message: string;
+}
+
 // ─── Cliente OpenRouter ──────────────────────────────────────────────────────
 async function llamarAOpenRouter(
   apiKey: string,
@@ -185,11 +196,11 @@ async function llamarAOpenRouter(
   contenidoNuevo: string,
   nombreArchivo: string,
   systemPrompt: string
-): Promise<string> {
+): Promise<CompletionSuccess> {
   const modelName = process.env.OPENROUTER_MODEL || "openrouter/free";
   const userPrompt = construirUserPrompt(contenidoAntiguo, contenidoNuevo, nombreArchivo);
 
-  const requestCompletion = async (selectedModel: string) => {
+  const requestCompletion = async (selectedModel: string): Promise<CompletionSuccess | CompletionError> => {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -210,26 +221,82 @@ async function llamarAOpenRouter(
 
     if (!response.ok) {
       const errorText = await response.text();
-      return JSON.stringify({ error: true, status: response.status, message: errorText });
+      return { error: true, status: response.status, message: errorText };
     }
 
     const data = await response.json();
-    return data.choices?.[0]?.message?.content || "";
+    const content = data.choices?.[0]?.message?.content || "";
+    return { responseText: content, modelUsed: selectedModel };
   };
 
   let result = await requestCompletion(modelName);
+  let finalModel = modelName;
   
-  if (result.startsWith('{"error":true') && modelName !== "openrouter/free") {
-    const errorObj = JSON.parse(result);
-    if (errorObj.status === 404) {
-      console.warn(`[OpenRouter] Modelo ${modelName} no encontrado (404). Reintentando con fallback openrouter/free...`);
-      result = await requestCompletion("openrouter/free");
+  if ('error' in result) {
+    const errorObj = result;
+    const isQuotaOrNotFoundError = 
+      errorObj.status === 429 || 
+      errorObj.status === 404 || 
+      errorObj.status === 400 || 
+      String(errorObj.message).toLowerCase().includes("limit") ||
+      String(errorObj.message).toLowerCase().includes("not found");
+
+    if (isQuotaOrNotFoundError) {
+      console.warn(`[OpenRouter Diagnosis] Falló el modelo ${modelName}. Motivo: ${errorObj.message}. Consultando catálogo de modelos de OpenRouter...`);
+      try {
+        const diagResponse = await fetch("https://openrouter.ai/api/v1/models");
+        if (diagResponse.ok) {
+          const diagData = await diagResponse.json();
+          const listaModelos = diagData.data ? diagData.data.map((m: any) => m.id) : [];
+          console.warn("[OpenRouter Diagnosis] Modelos disponibles en catálogo:", listaModelos.length, "modelos encontrados.");
+
+          const prioridadesOpenRouter = [
+            "google/gemini-2.5-flash:free",
+            "google/gemini-2.0-flash-exp:free",
+            "meta-llama/llama-3.1-8b-instruct:free",
+            "qwen/qwen-2.5-coder-32b-instruct:free",
+            "openrouter/free"
+          ];
+
+          let modeloAlternativo = "";
+          for (const familia of prioridadesOpenRouter) {
+            const encontrado = listaModelos.find((m: string) => m === familia);
+            if (encontrado) {
+              modeloAlternativo = encontrado;
+              break;
+            }
+          }
+
+          if (modeloAlternativo && modeloAlternativo !== modelName) {
+            console.warn(`[OpenRouter Diagnosis] Reintentando dinámicamente con modelo gratuito autorizado: ${modeloAlternativo}`);
+            const retryResult = await requestCompletion(modeloAlternativo);
+            if (!('error' in retryResult)) {
+              result = retryResult;
+              finalModel = modeloAlternativo;
+            }
+          }
+        } else {
+          const errText = await diagResponse.text();
+          console.error(`[OpenRouter Diagnosis] Error al consultar catálogo: ${diagResponse.status} - ${errText}`);
+        }
+      } catch (diagErr) {
+        console.error("[OpenRouter Diagnosis] Error en el flujo de diagnóstico:", diagErr);
+      }
     }
   }
 
-  if (result.startsWith('{"error":true')) {
-    const errorObj = JSON.parse(result);
-    throw new Error(`Error de OpenRouter API (${errorObj.status}): ${errorObj.message}`);
+  // Fallback secundario directo a "openrouter/free" si todavía da error y no estábamos usando "openrouter/free"
+  if ('error' in result && modelName !== "openrouter/free") {
+    console.warn(`[OpenRouter] Todavía con errores. Reintentando por última vez con fallback por defecto openrouter/free...`);
+    const retryResult = await requestCompletion("openrouter/free");
+    if (!('error' in retryResult)) {
+      result = retryResult;
+      finalModel = "openrouter/free";
+    }
+  }
+
+  if ('error' in result) {
+    throw new Error(`Error de OpenRouter API (${result.status}): ${result.message}`);
   }
 
   return result;
@@ -242,34 +309,104 @@ async function llamarAGroq(
   contenidoNuevo: string,
   nombreArchivo: string,
   systemPrompt: string
-): Promise<string> {
+): Promise<CompletionSuccess> {
   const modelName = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
   const userPrompt = construirUserPrompt(contenidoAntiguo, contenidoNuevo, nombreArchivo);
 
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: modelName,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      temperature: 0.1,
-      response_format: { type: "json_object" },
-    }),
-  });
+  const requestCompletion = async (selectedModel: string): Promise<CompletionSuccess | CompletionError> => {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: selectedModel,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: 0.1,
+        response_format: { type: "json_object" },
+      }),
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Error de Groq API (${response.status}): ${errorText}`);
+    if (!response.ok) {
+      const errorText = await response.text();
+      return { error: true, status: response.status, message: errorText };
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || "";
+    return { responseText: content, modelUsed: selectedModel };
+  };
+
+  let result = await requestCompletion(modelName);
+  let finalModel = modelName;
+
+  if ('error' in result) {
+    const errorObj = result;
+    const isQuotaOrNotFoundError = 
+      errorObj.status === 429 || 
+      errorObj.status === 404 || 
+      errorObj.status === 400 || 
+      String(errorObj.message).toLowerCase().includes("limit") ||
+      String(errorObj.message).toLowerCase().includes("not found");
+
+    if (isQuotaOrNotFoundError) {
+      console.warn(`[Groq Diagnosis] Falló el modelo ${modelName}. Motivo: ${errorObj.message}. Consultando modelos disponibles para esta clave API...`);
+      try {
+        const diagResponse = await fetch("https://api.groq.com/openai/v1/models", {
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+          }
+        });
+
+        if (diagResponse.ok) {
+          const diagData = await diagResponse.json();
+          const listaModelos = diagData.data ? diagData.data.map((m: any) => m.id) : [];
+          console.warn("[Groq Diagnosis] Modelos disponibles para esta clave:", listaModelos);
+
+          const prioridadesGroq = [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-70b-versatile",
+            "llama-3.1-8b-instant",
+            "mixtral-8x7b-32768",
+            "gemma2-9b-it"
+          ];
+
+          let modeloAlternativo = "";
+          for (const familia of prioridadesGroq) {
+            const encontrado = listaModelos.find((m: string) => m === familia);
+            if (encontrado) {
+              modeloAlternativo = encontrado;
+              break;
+            }
+          }
+
+          if (modeloAlternativo && modeloAlternativo !== modelName) {
+            console.warn(`[Groq Diagnosis] Reintentando dinámicamente con modelo listado y autorizado: ${modeloAlternativo}`);
+            const retryResult = await requestCompletion(modeloAlternativo);
+            if (!('error' in retryResult)) {
+              result = retryResult;
+              finalModel = modeloAlternativo;
+            }
+          }
+        } else {
+          const errText = await diagResponse.text();
+          console.error(`[Groq Diagnosis] Error al consultar modelos: ${diagResponse.status} - ${errText}`);
+        }
+      } catch (diagErr) {
+        console.error("[Groq Diagnosis] Error en el flujo de diagnóstico:", diagErr);
+      }
+    }
+
+    if ('error' in result) {
+      throw new Error(`Error de Groq API (${result.status}): ${result.message}`);
+    }
   }
 
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || "";
+  return result;
 }
 
 // ─── Cliente Gemini ──────────────────────────────────────────────────────────
@@ -288,7 +425,7 @@ async function llamarAGemini(
   contenidoNuevo: string,
   nombreArchivo: string,
   systemPrompt: string
-): Promise<string> {
+): Promise<{ responseText: string; modelUsed: string }> {
   const genAI = getGeminiClient();
   // Preferir gemini-2.5-flash como modelo base moderno
   const modelName = process.env.GEMINI_MODEL || "gemini-2.5-flash";
@@ -310,7 +447,7 @@ async function llamarAGemini(
       { text: userPrompt },
     ]);
 
-    return result.response.text();
+    return { responseText: result.response.text(), modelUsed: selectedModel };
   };
 
   try {
@@ -333,8 +470,8 @@ async function llamarAGemini(
           const listaModelos = diagData.models ? diagData.models.map((m: any) => m.name) : [];
           console.warn("[Gemini Diagnosis] Modelos disponibles para esta clave:", listaModelos);
           
-          // Buscar cualquier versión de flash o pro autorizada en orden de preferencia
-          const familiasPreferencia = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-3.5-flash", "gemini-2.5-pro", "gemini-1.5-flash"];
+          // Buscar cualquier versión de flash o pro autorizada en orden de preferencia (modelos activos serie 3.x y 2.x)
+          const familiasPreferencia = ["gemini-3.5-flash", "gemini-3.1-pro", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-1.5-flash"];
           let modeloAlternativo = "";
           
           for (const familia of familiasPreferencia) {
@@ -400,9 +537,8 @@ export async function validarConIA(
     colaIntentos.push({
       nombre: "Google Gemini",
       ejecutar: async () => {
-        const model = process.env.GEMINI_MODEL || "gemini-1.5-flash";
-        const res = await llamarAGemini(contenidoAntiguo, contenidoNuevo, nombreArchivo, activeSystemPrompt);
-        return { responseText: res, proveedor: `Google Gemini (${model})` };
+        const { responseText, modelUsed } = await llamarAGemini(contenidoAntiguo, contenidoNuevo, nombreArchivo, activeSystemPrompt);
+        return { responseText, proveedor: `Google Gemini (${modelUsed})` };
       },
     });
   }
@@ -411,9 +547,8 @@ export async function validarConIA(
     colaIntentos.push({
       nombre: "Groq",
       ejecutar: async () => {
-        const model = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
-        const res = await llamarAGroq(groqApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo, activeSystemPrompt);
-        return { responseText: res, proveedor: `Groq (${model})` };
+        const { responseText, modelUsed } = await llamarAGroq(groqApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo, activeSystemPrompt);
+        return { responseText, proveedor: `Groq (${modelUsed})` };
       },
     });
   }
@@ -422,9 +557,8 @@ export async function validarConIA(
     colaIntentos.push({
       nombre: "OpenRouter",
       ejecutar: async () => {
-        const model = process.env.OPENROUTER_MODEL || "openrouter/free";
-        const res = await llamarAOpenRouter(openrouterApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo, activeSystemPrompt);
-        return { responseText: res, proveedor: `OpenRouter (${model})` };
+        const { responseText, modelUsed } = await llamarAOpenRouter(openrouterApiKey, contenidoAntiguo, contenidoNuevo, nombreArchivo, activeSystemPrompt);
+        return { responseText, proveedor: `OpenRouter (${modelUsed})` };
       },
     });
   }
